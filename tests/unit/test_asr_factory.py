@@ -24,10 +24,18 @@ def test_factory_returns_whisper_engine_for_explicit_whisper_config():
     assert isinstance(engine, WhisperEngine)
 
 
-def test_factory_raises_for_parakeet_until_engine_lands():
-    """Parakeet branch is wired in Task 7; until then it raises NotImplementedError."""
+def test_factory_returns_parakeet_engine_when_selected():
+    from src.transcription.engine import ParakeetEngine
+
     cfg = Config(transcription_engine="parakeet")
-    with pytest.raises(NotImplementedError, match="ParakeetEngine"):
+    engine = make_asr_engine(cfg, test_mode=True)
+    assert isinstance(engine, ParakeetEngine)
+
+
+def test_factory_raises_for_unknown_engine():
+    cfg = Config()
+    cfg.transcription_engine = "bogus"
+    with pytest.raises(ValueError, match="Unknown transcription engine"):
         make_asr_engine(cfg, test_mode=True)
 
 

@@ -490,10 +490,5 @@ def make_asr_engine(config: Config, test_mode: bool = False) -> ASREngine:
     if engine_name == "whisper":
         return WhisperEngine(config, test_mode=test_mode)
     if engine_name == "parakeet":
-        # ParakeetEngine is wired in Task 7. Until then this is a clear
-        # error rather than a silent fallback.
-        raise NotImplementedError(
-            "ParakeetEngine is not yet wired into the factory. "
-            "Set TRANSCRIPTION_ENGINE=whisper for now."
-        )
+        return ParakeetEngine(config, test_mode=test_mode)
     raise ValueError(f"Unknown transcription engine: {engine_name!r}")
