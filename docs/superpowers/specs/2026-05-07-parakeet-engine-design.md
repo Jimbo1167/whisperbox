@@ -90,7 +90,9 @@ The diarization alignment in `transcriber.py:_combine_segments_with_speakers` ov
 - sentence → segment (one transcribed segment per sentence)
 - sentence.tokens → segment.words (token.text → word.word)
 
-**Word whitespace normalization.** `faster-whisper` returns words with a leading space (e.g. `" hello"`), so downstream formatters that do `"".join(w["word"] for w in words)` produce correctly-spaced text. Parakeet/NeMo BPE tokens typically do not include the leading space. To preserve the existing output contract for SRT/VTT/JSON formatters, `ParakeetEngine` normalizes token text on the way out: if a token's text does not begin with a space and it is not the first word in its segment, prepend a single space. This keeps formatter behavior identical across engines without touching `src/output/`.
+**Word whitespace normalization.** `faster-whisper` returns words with a leading space (e.g. `" hello"`), so downstream formatters that do `"".join(w["word"] for w in words)` produce correctly-spaced text. Parakeet/NeMo BPE tokens typically do not include the leading space. To preserve the existing output contract for SRT/VTT/JSON formatters, `ParakeetEngine` normalizes token text on the way out: if a token's text does not begin with a space and it is not the first word in its segment, prepend a single space.
+
+The rule is naive on purpose. NeMo TDT models typically attach punctuation to the prior word, so the rule produces correct output for the cases we expect. If parakeet-mlx 0.5.1 ever emits punctuation as its own token (`["hello", " world", ".", " how"]`), the rule would yield `"hello world . how"`. Rather than guard against that pre-emptively, `tests/unit/test_parakeet_engine.py` includes a mid-sentence-punctuation fixture so a real divergence surfaces in tests and the rule can be refined then. This matches the "pin + isolated mapping" risk style used elsewhere in the spec.
 
 ### Timeout
 
@@ -141,8 +143,10 @@ Mirrors the existing `MockWhisperModel` pattern. `ParakeetEngine` in `test_mode=
 `requirements.txt` gains one line with a platform marker:
 
 ```
-parakeet-mlx>=0.5.1; sys_platform == "darwin" and platform_machine == "arm64"
+parakeet-mlx>=0.5.1,<0.6; sys_platform == "darwin" and platform_machine == "arm64"
 ```
+
+The upper bound `<0.6` mechanically enforces the "bumping the pin requires re-validating the token mapping" contract from the Loading section — a 0.6 release would fail to install until someone has run the unit tests against it and lifted the bound.
 
 The marker means:
 
@@ -154,6 +158,7 @@ The marker means:
 - **New** `tests/unit/test_parakeet_engine.py` — mirrors structure of existing engine tests. Patches `parakeet_mlx.from_pretrained` to return `MockParakeetModel`. Covers:
   - Engine loads in test_mode without importing `parakeet-mlx`.
   - `transcribe` returns the standard segment shape with populated `words`.
+  - Whitespace normalization: a fixture with mid-sentence punctuation tokens (e.g. `["hello", " world", ".", " how"]`) exercises the punctuation edge case. The test asserts the joined sentence text is human-readable so a future parakeet-mlx tokenization change surfaces here.
   - Cache key includes the engine identifier (whisper cache and parakeet cache do not collide).
   - Config validation rejects `engine=parakeet` on non-darwin / non-arm64.
 - **New fixtures** in `tests/conftest.py`: `mock_parakeet_model`, `test_parakeet_engine`.
