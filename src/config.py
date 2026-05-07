@@ -20,7 +20,8 @@ class Config:
             env_file: Optional path to a .env file to load
             **overrides: Optional keyword arguments to override env values.
                 Supported keys: whisper_model, language, output_format,
-                include_diarization, diarization_model, force_cpu
+                include_diarization, diarization_model, force_cpu,
+                transcription_engine, parakeet_model
         """
         if env_file:
             logger.info(f"Loading configuration from {env_file}")

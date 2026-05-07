@@ -1,4 +1,5 @@
 import os
+import platform
 import sys
 import pytest
 from unittest.mock import patch
@@ -116,8 +117,6 @@ def test_config_validate():
         config = Config()
         assert config.validate() is True
 
-
-import platform
 
 def _clear_engine_env(monkeypatch):
     monkeypatch.delenv("TRANSCRIPTION_ENGINE", raising=False)
