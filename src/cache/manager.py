@@ -261,54 +261,46 @@ class CacheManager:
         
         return cache_path
     
-    def get_cached_transcription(self, audio_path: str) -> Optional[List[Dict[str, Any]]]:
-        """
-        Get cached transcription results if they exist.
-        
+    def get_cached_transcription(self, audio_path: str, engine_id: str = "whisper") -> Optional[List[Dict[str, Any]]]:
+        """Get cached transcription results if they exist.
+
         Args:
             audio_path: Path to the audio file
-            
-        Returns:
-            Cached transcription results if they exist, None otherwise
+            engine_id: ASR engine identifier (e.g. "whisper-large-v3-turbo",
+                "parakeet-<slug>"). Different engines must not share cache entries.
         """
-        # Generate cache key
-        cache_key = self._generate_cache_key(audio_path, prefix="transcription")
-        
-        # Return None if file doesn't exist
+        prefix = f"transcription-{engine_id}"
+        cache_key = self._generate_cache_key(audio_path, prefix=prefix)
         if cache_key is None:
             return None
-            
+
         cache_path = self._get_cache_path(cache_key, "transcription")
-        
-        # Check if the cache is valid
         if self._is_cache_valid(cache_path):
             logger.info(f"Using cached transcription results: {cache_path}")
-            
-            # Load the transcription results from the cache
             with open(cache_path, "r") as f:
-                transcription_results = json.load(f)
-            
-            return transcription_results
-        
+                return json.load(f)
         return None
-    
-    def cache_transcription(self, audio_path: str, transcription_results: List[Dict[str, Any]]) -> None:
-        """
-        Cache transcription results.
-        
+
+    def cache_transcription(
+        self,
+        audio_path: str,
+        transcription_results: List[Dict[str, Any]],
+        engine_id: str = "whisper",
+    ) -> None:
+        """Cache transcription results.
+
         Args:
             audio_path: Path to the audio file
             transcription_results: Transcription results to cache
+            engine_id: ASR engine identifier (must match the value passed to
+                get_cached_transcription).
         """
-        # Generate cache key
-        cache_key = self._generate_cache_key(audio_path, prefix="transcription")
+        prefix = f"transcription-{engine_id}"
+        cache_key = self._generate_cache_key(audio_path, prefix=prefix)
         cache_path = self._get_cache_path(cache_key, "transcription")
-        
-        # Save the transcription results to the cache
         try:
             with open(cache_path, "w") as f:
                 json.dump(transcription_results, f)
-            
             logger.info(f"Cached transcription results: {cache_path}")
         except Exception as e:
             logger.warning(f"Error caching transcription results: {e}")

@@ -171,9 +171,9 @@ def test_cache_transcription(cache_manager, test_audio_file):
     
     # Cache the transcription results
     cache_manager.cache_transcription(test_audio_file, transcription_results)
-    
-    # Get the cache path
-    cache_key = cache_manager._generate_cache_key(test_audio_file, prefix="transcription")
+
+    # Get the cache path (default engine_id="whisper" → prefix="transcription-whisper")
+    cache_key = cache_manager._generate_cache_key(test_audio_file, prefix="transcription-whisper")
     cache_path = cache_manager._get_cache_path(cache_key, "transcription")
     
     # Check that the cache file exists
@@ -314,9 +314,53 @@ def test_get_cache_size(cache_manager):
     for i in range(5):
         with open(os.path.join(cache_manager.audio_cache_dir, f"test_{i}.wav"), "w") as f:
             f.write("test data" * 100)  # 900 bytes per file
-    
+
     # Get the cache size
     cache_size = cache_manager._get_cache_size()
-    
+
     # Check that the cache size is correct (5 files * 900 bytes = 4500 bytes)
-    assert cache_size == 5 * 900 
+    assert cache_size == 5 * 900
+
+
+class TestEngineScopedTranscriptionCache:
+    def test_cache_is_scoped_by_engine_id(self, tmp_path, monkeypatch):
+        """Same audio cached under different engine_ids must not collide."""
+        from src.cache.manager import CacheManager
+        from src.config import Config
+
+        monkeypatch.setattr(
+            "os.path.expanduser",
+            lambda p: str(tmp_path) if p == "~" else os.path.expanduser(p),
+        )
+        cfg = Config()
+        cm = CacheManager(cfg)
+
+        # Real audio file is required for cache key generation (uses st_mtime).
+        audio = tmp_path / "sample.wav"
+        audio.write_bytes(b"RIFF\x00\x00\x00\x00WAVE")
+
+        cm.cache_transcription(str(audio), [{"start": 0.0, "end": 1.0, "text": "w", "words": []}],
+                               engine_id="whisper-large-v3-turbo")
+        cm.cache_transcription(str(audio), [{"start": 0.0, "end": 1.0, "text": "p", "words": []}],
+                               engine_id="parakeet-mlx_community_parakeet-tdt-0.6b-v3")
+
+        assert cm.get_cached_transcription(str(audio), engine_id="whisper-large-v3-turbo")[0]["text"] == "w"
+        assert cm.get_cached_transcription(str(audio), engine_id="parakeet-mlx_community_parakeet-tdt-0.6b-v3")[0]["text"] == "p"
+
+    def test_default_engine_id_is_whisper(self, tmp_path, monkeypatch):
+        """Backwards compat: callers that don't pass engine_id behave as before."""
+        from src.cache.manager import CacheManager
+        from src.config import Config
+
+        monkeypatch.setattr(
+            "os.path.expanduser",
+            lambda p: str(tmp_path) if p == "~" else os.path.expanduser(p),
+        )
+        cfg = Config()
+        cm = CacheManager(cfg)
+
+        audio = tmp_path / "sample.wav"
+        audio.write_bytes(b"RIFF\x00\x00\x00\x00WAVE")
+
+        cm.cache_transcription(str(audio), [{"start": 0.0, "end": 1.0, "text": "x", "words": []}])
+        assert cm.get_cached_transcription(str(audio))[0]["text"] == "x"
