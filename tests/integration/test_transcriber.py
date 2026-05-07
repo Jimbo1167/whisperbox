@@ -214,3 +214,54 @@ class TestStreamingGuard:
 
         with pytest.raises(NotImplementedError, match="Streaming is only supported"):
             list(t.transcribe_stream_with_diarization("input.wav"))
+
+
+class TestEndToEndAcrossEngines:
+    """End-to-end transcribe + diarization combination across both engines.
+
+    Both engines must produce the same output shape so downstream formatters
+    and diarization alignment work identically.
+    """
+
+    @pytest.mark.parametrize("engine_name", ["whisper", "parakeet"])
+    def test_transcribe_with_diarization(self, engine_name, tmp_path, mock_diarizer, monkeypatch):
+        from src.config import Config
+        from src.transcriber import Transcriber
+
+        cfg = Config(
+            transcription_engine=engine_name,
+            include_diarization=True,
+        )
+        cfg.cache_enabled = False
+        cfg.hf_token = "test_token"
+
+        # Bypass platform validation for parakeet by not calling validate(); we
+        # exercise the engine's runtime behavior here, not config validation.
+        # ParakeetEngine in test_mode does not import parakeet_mlx, so this works
+        # on Linux CI as well.
+
+        t = Transcriber(cfg, test_mode=True)
+
+        # Real audio file so AudioProcessor works.
+        audio = tmp_path / "x.wav"
+        import wave, numpy as np
+        sr = 16000
+        samples = np.zeros(int(2.0 * sr), dtype=np.int16)
+        with wave.open(str(audio), "wb") as f:
+            f.setnchannels(1); f.setsampwidth(2); f.setframerate(sr)
+            f.writeframes(samples.tobytes())
+
+        t.diarization_engine.diarizer = mock_diarizer
+
+        segments = t.transcribe(str(audio))
+
+        # Output shape contract is the same regardless of engine.
+        assert len(segments) > 0
+        for seg in segments:
+            assert isinstance(seg, tuple)
+            assert len(seg) == 4
+            start, end, text, speaker = seg
+            assert isinstance(start, float)
+            assert isinstance(end, float)
+            assert isinstance(text, str)
+            assert isinstance(speaker, str)

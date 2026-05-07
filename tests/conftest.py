@@ -99,22 +99,27 @@ def mock_whisper_model():
 def mock_diarizer():
     """Create a mock diarizer."""
     mock = MagicMock()
-    
+
     # Mock the __call__ method
     def mock_call(audio_path):
         # Create mock diarization
         class MockDiarization:
             def itertracks(self, yield_label=False):
+                class Segment:
+                    def __init__(self, start, end):
+                        self.start = start
+                        self.end = end
+
                 tracks = [
-                    ((0.0, 2.0), None, "SPEAKER_01"),
-                    ((2.0, 4.0), None, "SPEAKER_02")
+                    (Segment(0.0, 2.0), None, "SPEAKER_01"),
+                    (Segment(2.0, 4.0), None, "SPEAKER_02"),
                 ]
                 for track in tracks:
                     yield track
-        
+
         return MockDiarization()
-    
-    mock.__call__.side_effect = mock_call
+
+    mock.side_effect = mock_call
     return mock
 
 @pytest.fixture
