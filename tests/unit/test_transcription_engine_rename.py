@@ -1,7 +1,5 @@
 """WhisperEngine rename + backward-compat alias + slug helper."""
 
-import re
-
 from src.transcription.engine import (
     TranscriptionEngine,
     WhisperEngine,
@@ -54,3 +52,26 @@ def test_whisper_engine_passes_engine_id_to_cache(test_config, mock_whisper_mode
     cache_mock.cache_transcription.assert_called_once()
     _, kwargs = cache_mock.cache_transcription.call_args
     assert kwargs["engine_id"] == f"whisper-{cfg.whisper_model_size}"
+
+
+def test_whisper_engine_id_slugs_unsafe_model_size(test_config, mock_whisper_model, tmp_path):
+    """Non-canonical WHISPER_MODEL values (e.g. HF org/model paths) must be slugged."""
+    from unittest.mock import MagicMock
+    cfg = test_config
+    cfg.cache_enabled = True
+    cfg.whisper_model_size = "deepdml/faster-distil-whisper-large-v3.5"
+
+    engine = WhisperEngine(cfg)
+    engine.whisper = mock_whisper_model
+
+    cache_mock = MagicMock()
+    cache_mock.get_cached_transcription.return_value = None
+    engine.cache_manager = cache_mock
+
+    audio = tmp_path / "x.wav"
+    audio.write_bytes(b"RIFF\x00\x00\x00\x00WAVE")
+    engine.transcribe(str(audio))
+
+    _, kwargs = cache_mock.get_cached_transcription.call_args
+    assert "/" not in kwargs["engine_id"]
+    assert kwargs["engine_id"] == "whisper-deepdml_faster-distil-whisper-large-v3.5"

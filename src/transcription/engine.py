@@ -146,7 +146,7 @@ class WhisperEngine:
             Exception: If transcription fails
         """
         # Check if we have cached results
-        cache_engine_id = f"whisper-{self.whisper_model_size}"
+        cache_engine_id = f"whisper-{_slug(self.whisper_model_size)}"
 
         if self.cache_manager:
             cached_transcription = self.cache_manager.get_cached_transcription(
@@ -297,6 +297,6 @@ class WhisperEngine:
             raise Exception(f"Error starting async transcription: {str(e)}")
 
 
-# Backward-compat alias: external code, tests, and `service.py` still import
-# `TranscriptionEngine`. Streaming methods remain on this class.
+# Backward-compat alias: src/transcriber.py and existing tests import
+# `TranscriptionEngine` by name. Streaming methods remain on this class.
 TranscriptionEngine = WhisperEngine
