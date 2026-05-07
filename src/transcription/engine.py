@@ -2,7 +2,7 @@ import os
 import re
 import time
 import logging
-from typing import List, Dict, Any, Optional, Tuple, Iterator, Generator
+from typing import List, Dict, Any, Optional, Tuple, Iterator, Generator, Protocol, runtime_checkable
 import concurrent.futures
 from contextlib import contextmanager
 import threading
@@ -26,6 +26,20 @@ def _slug(text: str) -> str:
     Both must produce a single safe token.
     """
     return re.sub(r"[^A-Za-z0-9._-]", "_", text)
+
+
+@runtime_checkable
+class ASREngine(Protocol):
+    """Batch-only ASR contract.
+
+    Streaming is a Whisper-only extension and is not part of this protocol.
+    Code that needs streaming should depend on WhisperEngine concretely or
+    guard on Config.transcription_engine == "whisper" upstream.
+    """
+
+    def ensure_model_loaded(self) -> None: ...
+
+    def transcribe(self, audio_path: str) -> List[Dict[str, Any]]: ...
 
 
 class WhisperEngine:
@@ -300,3 +314,18 @@ class WhisperEngine:
 # Backward-compat alias: src/transcriber.py and existing tests import
 # `TranscriptionEngine` by name. Streaming methods remain on this class.
 TranscriptionEngine = WhisperEngine
+
+
+def make_asr_engine(config: Config, test_mode: bool = False) -> ASREngine:
+    """Construct the ASR engine selected by config.transcription_engine."""
+    engine_name = config.transcription_engine
+    if engine_name == "whisper":
+        return WhisperEngine(config, test_mode=test_mode)
+    if engine_name == "parakeet":
+        # ParakeetEngine is wired in Task 7. Until then this is a clear
+        # error rather than a silent fallback.
+        raise NotImplementedError(
+            "ParakeetEngine is not yet wired into the factory. "
+            "Set TRANSCRIPTION_ENGINE=whisper for now."
+        )
+    raise ValueError(f"Unknown transcription engine: {engine_name!r}")
