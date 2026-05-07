@@ -105,7 +105,7 @@ def transcribe_file(server_url, file_path, options=None):
                 
                 while True:
                     time.sleep(1.0)  # Poll every second
-                    status_response = session.get(f"{server_url}/job/{job_id}")
+                    status_response = session.get(f"{server_url}/api/jobs/{job_id}")
                     status_response.raise_for_status()
                     job_status = status_response.json()
                     
@@ -223,7 +223,7 @@ def display_server_status(status):
         print(f"Completed jobs: {queue.get('completed_jobs', 0)}")
         print(f"Failed jobs: {queue.get('failed_jobs', 0)}")
 
-def main():
+def main(argv=None):
     """Main function for the model client script."""
     parser = argparse.ArgumentParser(
         description="Client for interacting with the model server"
@@ -269,7 +269,7 @@ def main():
         help="Output format (default: txt)"
     )
     
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     
     # Default to status if no command specified
     if not args.command:
