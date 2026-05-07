@@ -1,7 +1,9 @@
 import os
 import sys
+import wave
 import pytest
 import tempfile
+import numpy as np
 from unittest.mock import patch, MagicMock
 
 # Add the parent directory to the path so we can import the src package
@@ -224,10 +226,7 @@ class TestEndToEndAcrossEngines:
     """
 
     @pytest.mark.parametrize("engine_name", ["whisper", "parakeet"])
-    def test_transcribe_with_diarization(self, engine_name, tmp_path, mock_diarizer, monkeypatch):
-        from src.config import Config
-        from src.transcriber import Transcriber
-
+    def test_transcribe_with_diarization(self, engine_name, tmp_path, mock_diarizer):
         cfg = Config(
             transcription_engine=engine_name,
             include_diarization=True,
@@ -244,11 +243,12 @@ class TestEndToEndAcrossEngines:
 
         # Real audio file so AudioProcessor works.
         audio = tmp_path / "x.wav"
-        import wave, numpy as np
         sr = 16000
         samples = np.zeros(int(2.0 * sr), dtype=np.int16)
         with wave.open(str(audio), "wb") as f:
-            f.setnchannels(1); f.setsampwidth(2); f.setframerate(sr)
+            f.setnchannels(1)
+            f.setsampwidth(2)
+            f.setframerate(sr)
             f.writeframes(samples.tobytes())
 
         t.diarization_engine.diarizer = mock_diarizer
