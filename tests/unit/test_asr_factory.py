@@ -10,17 +10,23 @@ from src.transcription.engine import (
 )
 
 
-def test_factory_returns_whisper_engine_by_default():
+def test_factory_default_config_returns_whisper_engine(monkeypatch):
+    """Config default (no env override) routes to WhisperEngine."""
+    monkeypatch.delenv("TRANSCRIPTION_ENGINE", raising=False)
     cfg = Config()
-    cfg.transcription_engine = "whisper"
     engine = make_asr_engine(cfg, test_mode=True)
     assert isinstance(engine, WhisperEngine)
 
 
-def test_factory_raises_for_parakeet_until_engine_lands(monkeypatch):
+def test_factory_returns_whisper_engine_for_explicit_whisper_config():
+    cfg = Config(transcription_engine="whisper")
+    engine = make_asr_engine(cfg, test_mode=True)
+    assert isinstance(engine, WhisperEngine)
+
+
+def test_factory_raises_for_parakeet_until_engine_lands():
     """Parakeet branch is wired in Task 7; until then it raises NotImplementedError."""
-    cfg = Config()
-    cfg.transcription_engine = "parakeet"
+    cfg = Config(transcription_engine="parakeet")
     with pytest.raises(NotImplementedError, match="ParakeetEngine"):
         make_asr_engine(cfg, test_mode=True)
 
