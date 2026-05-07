@@ -1,4 +1,6 @@
 import os
+import platform
+import sys
 from typing import Optional, Dict, Any
 from dotenv import load_dotenv
 import logging
@@ -31,6 +33,10 @@ class Config:
         self.whisper_model_size = os.getenv("WHISPER_MODEL", "large-v3-turbo")
         self.diarization_model = os.getenv("DIARIZATION_MODEL", "pyannote/speaker-diarization-community-1")
         self.language = os.getenv("LANGUAGE", "en")
+
+        # ASR engine selection
+        self.transcription_engine = os.getenv("TRANSCRIPTION_ENGINE", "whisper").strip().lower()
+        self.parakeet_model = os.getenv("PARAKEET_MODEL", "mlx-community/parakeet-tdt-0.6b-v3")
 
         # Parse output format
         self._output_format = None
@@ -76,6 +82,10 @@ class Config:
             self.diarization_model = overrides['diarization_model']
         if 'force_cpu' in overrides:
             self.force_cpu = bool(overrides['force_cpu'])
+        if 'transcription_engine' in overrides:
+            self.transcription_engine = str(overrides['transcription_engine']).strip().lower()
+        if 'parakeet_model' in overrides:
+            self.parakeet_model = overrides['parakeet_model']
 
         logger.debug(f"Configuration loaded: {self.to_dict()}")
 
@@ -115,24 +125,36 @@ class Config:
             "force_cpu": self.force_cpu,
             "cache_enabled": self.cache_enabled,
             "cache_expiration": self.cache_expiration,
-            "max_cache_size": self.max_cache_size
+            "max_cache_size": self.max_cache_size,
+            "transcription_engine": self.transcription_engine,
+            "parakeet_model": self.parakeet_model,
         }
     
     def validate(self) -> bool:
-        """Validate the configuration.
-        
-        Returns:
-            True if the configuration is valid, False otherwise
-        """
-        # Check if HF token is provided when diarization is enabled
+        """Validate the configuration."""
         if self.include_diarization and not self.hf_token:
             logger.warning("Speaker diarization is enabled but HF_TOKEN is not set")
             return False
-        
-        # Check if output format is valid
+
         valid_formats = ["txt", "srt", "vtt", "json", "pretty"]
         if self.output_format not in valid_formats:
             logger.warning(f"Invalid output format: {self.output_format}. Must be one of {valid_formats}")
             return False
-        
-        return True 
+
+        valid_engines = {"whisper", "parakeet"}
+        if self.transcription_engine not in valid_engines:
+            logger.error(
+                f"Invalid TRANSCRIPTION_ENGINE: {self.transcription_engine!r}. "
+                f"Must be one of {sorted(valid_engines)}"
+            )
+            return False
+
+        if self.transcription_engine == "parakeet":
+            if sys.platform != "darwin" or platform.machine() != "arm64":
+                logger.error(
+                    "Parakeet requires Apple Silicon (macOS arm64). "
+                    "Set TRANSCRIPTION_ENGINE=whisper or run on macOS arm64."
+                )
+                return False
+
+        return True

@@ -114,4 +114,58 @@ def test_config_validate():
     # Test valid configuration: diarization disabled, no HF token needed
     with patch.dict(os.environ, {"HF_TOKEN": "", "INCLUDE_DIARIZATION": "false"}, clear=True):
         config = Config()
-        assert config.validate() is True 
+        assert config.validate() is True
+
+
+import platform
+
+def _clear_engine_env(monkeypatch):
+    monkeypatch.delenv("TRANSCRIPTION_ENGINE", raising=False)
+    monkeypatch.delenv("PARAKEET_MODEL", raising=False)
+
+
+class TestEngineSelection:
+    def test_defaults(self, monkeypatch):
+        _clear_engine_env(monkeypatch)
+        cfg = Config()
+        assert cfg.transcription_engine == "whisper"
+        assert cfg.parakeet_model == "mlx-community/parakeet-tdt-0.6b-v3"
+
+    def test_env_override(self, monkeypatch):
+        monkeypatch.setenv("TRANSCRIPTION_ENGINE", "Parakeet")
+        monkeypatch.setenv("PARAKEET_MODEL", "/tmp/local-mlx-model")
+        cfg = Config()
+        assert cfg.transcription_engine == "parakeet"  # lowercased + stripped
+        assert cfg.parakeet_model == "/tmp/local-mlx-model"
+
+    def test_kwargs_override(self, monkeypatch):
+        _clear_engine_env(monkeypatch)
+        cfg = Config(transcription_engine="parakeet", parakeet_model="custom/model")
+        assert cfg.transcription_engine == "parakeet"
+        assert cfg.parakeet_model == "custom/model"
+
+    def test_to_dict_includes_new_fields(self, monkeypatch):
+        _clear_engine_env(monkeypatch)
+        cfg = Config()
+        d = cfg.to_dict()
+        assert d["transcription_engine"] == "whisper"
+        assert d["parakeet_model"] == "mlx-community/parakeet-tdt-0.6b-v3"
+
+    def test_validate_rejects_unknown_engine(self, monkeypatch):
+        _clear_engine_env(monkeypatch)
+        cfg = Config(transcription_engine="bogus")
+        assert cfg.validate() is False
+
+    def test_validate_rejects_parakeet_on_non_apple_silicon(self, monkeypatch):
+        _clear_engine_env(monkeypatch)
+        cfg = Config(transcription_engine="parakeet")
+        monkeypatch.setattr(sys, "platform", "linux")
+        monkeypatch.setattr(platform, "machine", lambda: "x86_64")
+        assert cfg.validate() is False
+
+    def test_validate_accepts_parakeet_on_apple_silicon(self, monkeypatch):
+        _clear_engine_env(monkeypatch)
+        cfg = Config(transcription_engine="parakeet")
+        monkeypatch.setattr(sys, "platform", "darwin")
+        monkeypatch.setattr(platform, "machine", lambda: "arm64")
+        assert cfg.validate() is True
