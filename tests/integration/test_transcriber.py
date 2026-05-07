@@ -178,3 +178,39 @@ def test_transcribe_reports_progress(transcriber, mock_audio_processor, mock_tra
     assert progress_events
     assert progress_events[0][0] == "Preparing audio"
     assert progress_events[-1][0] == "Finalizing transcript"
+
+
+class TestStreamingGuard:
+    def test_transcribe_stream_rejects_parakeet_engine(self, mock_config):
+        from src.transcriber import Transcriber
+
+        mock_config.transcription_engine = "parakeet"
+        # Bypass factory's NotImplementedError by stubbing engine after construction.
+        # We're testing the upstream guard, not engine construction.
+        t = Transcriber.__new__(Transcriber)
+        t.config = mock_config
+        t.audio_processor = MagicMock()
+        t.transcription_engine = MagicMock()
+        t.diarization_engine = MagicMock()
+        t.output_formatter = MagicMock()
+        t.include_diarization = False
+        t.test_mode = False
+
+        with pytest.raises(NotImplementedError, match="Streaming is only supported"):
+            list(t.transcribe_stream("input.wav"))
+
+    def test_transcribe_stream_with_diarization_rejects_parakeet(self, mock_config):
+        from src.transcriber import Transcriber
+
+        mock_config.transcription_engine = "parakeet"
+        t = Transcriber.__new__(Transcriber)
+        t.config = mock_config
+        t.audio_processor = MagicMock()
+        t.transcription_engine = MagicMock()
+        t.diarization_engine = MagicMock()
+        t.output_formatter = MagicMock()
+        t.include_diarization = True
+        t.test_mode = False
+
+        with pytest.raises(NotImplementedError, match="Streaming is only supported"):
+            list(t.transcribe_stream_with_diarization("input.wav"))

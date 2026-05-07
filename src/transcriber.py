@@ -6,7 +6,7 @@ import concurrent.futures
 
 from .config import Config
 from .audio.processor import AudioProcessor, TimeoutException
-from .transcription.engine import TranscriptionEngine
+from .transcription.engine import make_asr_engine
 from .diarization.engine import DiarizationEngine
 from .output.formatter import OutputFormatter
 
@@ -37,7 +37,7 @@ class Transcriber:
         
         # Initialize components
         self.audio_processor = AudioProcessor(self.config)
-        self.transcription_engine = TranscriptionEngine(self.config, test_mode=test_mode)
+        self.transcription_engine = make_asr_engine(self.config, test_mode=test_mode)
         self.diarization_engine = DiarizationEngine(self.config, test_mode=test_mode)
         self.output_formatter = OutputFormatter(self.config)
         
@@ -262,9 +262,15 @@ class Transcriber:
         Raises:
             Exception: If transcription fails
         """
+        if self.config.transcription_engine != "whisper":
+            raise NotImplementedError(
+                "Streaming is only supported with TRANSCRIPTION_ENGINE=whisper. "
+                "Use transcribe() for batch transcription with Parakeet."
+            )
+
         logger.info(f"Starting streaming transcription for {input_path}")
         start_time = time.time()
-        
+
         try:
             # Get the audio path
             audio_path, needs_cleanup = self.audio_processor.get_audio_path(input_path)
@@ -304,9 +310,15 @@ class Transcriber:
         Raises:
             Exception: If transcription or diarization fails
         """
+        if self.config.transcription_engine != "whisper":
+            raise NotImplementedError(
+                "Streaming is only supported with TRANSCRIPTION_ENGINE=whisper. "
+                "Use transcribe() for batch transcription with Parakeet."
+            )
+
         logger.info(f"Starting streaming transcription with diarization for {input_path}")
         start_time = time.time()
-        
+
         try:
             # Get the audio path
             audio_path, needs_cleanup = self.audio_processor.get_audio_path(input_path)

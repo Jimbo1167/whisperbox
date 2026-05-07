@@ -73,6 +73,7 @@ def test_config():
             self.cache_enabled = False
             self.cache_expiration = 7 * 24 * 60 * 60  # 7 days in seconds
             self.max_cache_size = 10 * 1024 * 1024 * 1024  # 10GB
+            self.transcription_engine = "whisper"
     return TestConfig()
 
 @pytest.fixture
