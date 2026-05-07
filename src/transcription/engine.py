@@ -1,4 +1,5 @@
 import os
+import re
 import time
 import logging
 from typing import List, Dict, Any, Optional, Tuple, Iterator, Generator
@@ -17,8 +18,18 @@ from .streaming import StreamingTranscriber, AsyncStreamingTranscriber
 
 logger = logging.getLogger(__name__)
 
-class TranscriptionEngine:
-    """Handles transcription of audio files using the Whisper model."""
+
+def _slug(text: str) -> str:
+    """Return a filesystem-safe slug for cache keys and filenames.
+
+    HF model ids contain '/'; local paths contain '/' (and on macOS, spaces).
+    Both must produce a single safe token.
+    """
+    return re.sub(r"[^A-Za-z0-9._-]", "_", text)
+
+
+class WhisperEngine:
+    """Whisper-based ASR engine using faster-whisper."""
     
     def __init__(self, config: Config, test_mode: bool = False):
         """Initialize the transcription engine.
@@ -135,8 +146,12 @@ class TranscriptionEngine:
             Exception: If transcription fails
         """
         # Check if we have cached results
+        cache_engine_id = f"whisper-{self.whisper_model_size}"
+
         if self.cache_manager:
-            cached_transcription = self.cache_manager.get_cached_transcription(audio_path)
+            cached_transcription = self.cache_manager.get_cached_transcription(
+                audio_path, engine_id=cache_engine_id
+            )
             if cached_transcription:
                 return cached_transcription
         
@@ -174,7 +189,9 @@ class TranscriptionEngine:
                 
                 # Cache the results if caching is enabled
                 if self.cache_manager:
-                    self.cache_manager.cache_transcription(audio_path, result)
+                    self.cache_manager.cache_transcription(
+                        audio_path, result, engine_id=cache_engine_id
+                    )
                 
                 return result
                 
@@ -277,4 +294,9 @@ class TranscriptionEngine:
                 
         except Exception as e:
             logger.error(f"Error starting async transcription: {str(e)}")
-            raise Exception(f"Error starting async transcription: {str(e)}") 
+            raise Exception(f"Error starting async transcription: {str(e)}")
+
+
+# Backward-compat alias: external code, tests, and `service.py` still import
+# `TranscriptionEngine`. Streaming methods remain on this class.
+TranscriptionEngine = WhisperEngine

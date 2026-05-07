@@ -84,7 +84,8 @@ def mock_whisper_model():
                 self.start = start
                 self.end = end
                 self.text = text
-        
+                self.words = []
+
         segments = [
             MockSegment(0.0, 2.0, "Test segment one"),
             MockSegment(2.0, 4.0, "Test segment two")
