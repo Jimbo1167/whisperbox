@@ -3,9 +3,10 @@ proglog==0.1.10
 psutil==5.9.0
 faster-whisper>=1.1.0
 moviepy==1.0.3
-pyannote.audio>=3.3
+pyannote.audio>=4.0,<5
 python-dotenv==1.0.1
 tqdm==4.66.2
 numpy>=1.24.0
 pydub==0.25.1
 audioop-lts>=0.2.1; python_version>="3.13"
+parakeet-mlx>=0.5.1,<0.6; sys_platform == "darwin" and platform_machine == "arm64"
