@@ -252,14 +252,17 @@ class Transcriber:
     def transcribe_stream(self, input_path: str) -> Generator[Dict[str, Any], None, None]:
         """
         Transcribe an audio or video file using streaming to reduce memory usage.
-        
+
         Args:
             input_path: Path to the audio or video file
-            
+
         Yields:
             Transcription segments as they become available
-            
+
         Raises:
+            NotImplementedError: If TRANSCRIPTION_ENGINE != "whisper". Because this
+                is a generator function, the error fires on first iteration
+                (e.g. ``next()`` or ``list()``), not at call time.
             Exception: If transcription fails
         """
         if self.config.transcription_engine != "whisper":
@@ -300,14 +303,17 @@ class Transcriber:
         """
         Transcribe an audio or video file using streaming with diarization.
         This method first performs diarization on the entire file, then streams the transcription.
-        
+
         Args:
             input_path: Path to the audio or video file
-            
+
         Yields:
             Transcription segments with speaker information as they become available
-            
+
         Raises:
+            NotImplementedError: If TRANSCRIPTION_ENGINE != "whisper". Because this
+                is a generator function, the error fires on first iteration
+                (e.g. ``next()`` or ``list()``), not at call time.
             Exception: If transcription or diarization fails
         """
         if self.config.transcription_engine != "whisper":

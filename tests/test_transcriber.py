@@ -74,6 +74,7 @@ def test_config():
             self.cache_expiration = 7 * 24 * 60 * 60  # 7 days in seconds
             self.max_cache_size = 10 * 1024 * 1024 * 1024  # 10GB
             self.transcription_engine = "whisper"
+            self.parakeet_model = "mlx-community/parakeet-tdt-0.6b-v3"
     return TestConfig()
 
 @pytest.fixture
