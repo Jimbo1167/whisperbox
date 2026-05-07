@@ -311,6 +311,179 @@ class WhisperEngine:
             raise Exception(f"Error starting async transcription: {str(e)}")
 
 
+class ParakeetEngine:
+    """Parakeet-MLX ASR engine. Apple Silicon only. Batch-only.
+
+    Long-form audio is handled by parakeet-mlx's built-in chunking
+    (chunk_duration / overlap_duration) — we do not roll our own VAD
+    chunking. See spec §"Long-form chunking".
+    """
+
+    # parakeet-mlx 0.5.1 defaults — exposed as class constants for visibility.
+    CHUNK_DURATION = 120
+    OVERLAP_DURATION = 15
+
+    # Punctuation token characters that are "naturally" attached to the
+    # prior word in formatted text (no space prepended). The whitespace
+    # normalizer is intentionally simple — see spec.
+    _PUNCTUATION_HINTS = frozenset(",.!?;:")
+
+    def __init__(self, config: Config, test_mode: bool = False):
+        self.config = config
+        self.timeout_seconds = config.transcribe_timeout
+        self.parakeet_model_id = config.parakeet_model
+        self.test_mode = test_mode
+        self.parakeet = None
+
+        self.cache_dir = os.path.join(os.path.expanduser("~"), ".cache", "video_transcriber")
+        os.makedirs(self.cache_dir, exist_ok=True)
+        self.cache_manager = CacheManager(config) if config.cache_enabled else None
+
+        if config.force_cpu:
+            logger.warning(
+                "FORCE_CPU has no effect on Parakeet (MLX); flag is Whisper-only."
+            )
+
+        if self.test_mode:
+            self._load_model()
+
+    def _engine_id(self) -> str:
+        return f"parakeet-{_slug(self.parakeet_model_id)}"
+
+    def _load_model(self):
+        if self.parakeet is not None:
+            return
+
+        if self.test_mode:
+            logger.info("Test mode enabled, using mock parakeet model")
+
+            class _Token:
+                def __init__(self, text, start, end):
+                    self.text = text
+                    self.start = start
+                    self.end = end
+
+            class _Sentence:
+                def __init__(self, text, start, end, tokens):
+                    self.text = text
+                    self.start = start
+                    self.end = end
+                    self.tokens = tokens
+
+            class _AlignedResult:
+                text = "Hello world."
+                sentences = [
+                    _Sentence(
+                        "Hello world.", 0.0, 1.0,
+                        [_Token("Hello", 0.0, 0.5), _Token(" world.", 0.5, 1.0)],
+                    ),
+                ]
+
+            class MockParakeetModel:
+                def transcribe(self, audio_path, **kwargs):
+                    return _AlignedResult()
+
+            self.parakeet = MockParakeetModel()
+            return
+
+        # Lazy import: parakeet_mlx is darwin/arm64 only and imported only
+        # when actually needed. Test patch target is `parakeet_mlx.from_pretrained`.
+        import parakeet_mlx  # noqa: WPS433
+
+        try:
+            logger.info(f"Loading parakeet-mlx model: {self.parakeet_model_id}")
+            self.parakeet = parakeet_mlx.from_pretrained(self.parakeet_model_id)
+            logger.info("parakeet-mlx model loaded successfully")
+        except Exception as e:
+            logger.error(f"Error loading parakeet-mlx model: {e}")
+            raise
+
+    def ensure_model_loaded(self) -> None:
+        if self.parakeet is None:
+            self._load_model()
+
+    def transcribe(self, audio_path: str) -> List[Dict[str, Any]]:
+        cache_engine_id = self._engine_id()
+
+        if self.cache_manager:
+            cached = self.cache_manager.get_cached_transcription(
+                audio_path, engine_id=cache_engine_id
+            )
+            if cached:
+                return cached
+
+        self.ensure_model_loaded()
+        logger.info(f"Starting parakeet transcription for {audio_path}")
+        start_time = time.time()
+
+        try:
+            with timeout(self.timeout_seconds, "Transcription timed out"):
+                result = self.parakeet.transcribe(
+                    audio_path,
+                    chunk_duration=self.CHUNK_DURATION,
+                    overlap_duration=self.OVERLAP_DURATION,
+                )
+
+                segments = self._map_aligned_result(result)
+
+                elapsed = time.time() - start_time
+                logger.info(
+                    f"Parakeet transcription completed in {elapsed:.1f}s, "
+                    f"{len(segments)} segments"
+                )
+
+                if self.cache_manager:
+                    self.cache_manager.cache_transcription(
+                        audio_path, segments, engine_id=cache_engine_id
+                    )
+                return segments
+
+        except TimeoutException:
+            logger.error(f"Parakeet transcription timed out after {self.timeout_seconds}s")
+            raise
+        except Exception as e:
+            logger.error(f"Error during parakeet transcription: {e}")
+            raise Exception(f"Error during parakeet transcription: {e}")
+
+    @classmethod
+    def _map_aligned_result(cls, result) -> List[Dict[str, Any]]:
+        """Map parakeet-mlx AlignedResult → standard segment shape."""
+        segments: List[Dict[str, Any]] = []
+        for sentence in result.sentences:
+            words: List[Dict[str, Any]] = []
+            for idx, token in enumerate(sentence.tokens):
+                text = token.text
+                # Whitespace normalization: see spec §"Word whitespace normalization".
+                if idx > 0 and not text.startswith(" "):
+                    text = " " + text
+                words.append({
+                    "start": float(token.start),
+                    "end": float(token.end),
+                    "word": text,
+                })
+            segments.append({
+                "start": float(sentence.start),
+                "end": float(sentence.end),
+                "text": sentence.text.strip(),
+                "words": words,
+            })
+        return segments
+
+    # Streaming is Whisper-only — defensive stubs in case the upstream guard
+    # in transcriber.py is ever bypassed.
+    def transcribe_stream(self, audio_stream):
+        raise NotImplementedError(
+            "Streaming is only supported with TRANSCRIPTION_ENGINE=whisper. "
+            "Use transcribe() for batch transcription with Parakeet."
+        )
+
+    def start_async_transcription(self, audio_stream):
+        raise NotImplementedError(
+            "Streaming is only supported with TRANSCRIPTION_ENGINE=whisper. "
+            "Use transcribe() for batch transcription with Parakeet."
+        )
+
+
 # Backward-compat alias: src/transcriber.py and existing tests import
 # `TranscriptionEngine` by name. Streaming methods remain on this class.
 TranscriptionEngine = WhisperEngine

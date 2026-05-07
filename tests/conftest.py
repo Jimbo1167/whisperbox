@@ -185,4 +185,65 @@ def output_dir(tmp_path):
     """Create and return a temporary directory for test outputs."""
     output_path = tmp_path / "transcripts"
     output_path.mkdir(exist_ok=True)
-    return output_path 
+    return output_path
+
+
+@pytest.fixture
+def mock_parakeet_model():
+    """Mock parakeet-mlx model that mirrors the AlignedResult shape we depend on."""
+    mock = MagicMock()
+
+    class _Token:
+        def __init__(self, text, start, end):
+            self.text = text
+            self.start = start
+            self.end = end
+
+    class _Sentence:
+        def __init__(self, text, start, end, tokens):
+            self.text = text
+            self.start = start
+            self.end = end
+            self.tokens = tokens
+
+    class _AlignedResult:
+        def __init__(self):
+            self.text = "Hello world. How are you"
+            self.sentences = [
+                _Sentence(
+                    text="Hello world.",
+                    start=0.0,
+                    end=1.5,
+                    tokens=[
+                        _Token("Hello", 0.0, 0.5),
+                        _Token(" world", 0.5, 1.4),
+                        _Token(".", 1.4, 1.5),
+                    ],
+                ),
+                _Sentence(
+                    text="How are you",
+                    start=2.0,
+                    end=3.0,
+                    tokens=[
+                        _Token("How", 2.0, 2.3),
+                        _Token(" are", 2.3, 2.6),
+                        _Token(" you", 2.6, 3.0),
+                    ],
+                ),
+            ]
+
+    def _transcribe(audio_path, **kwargs):
+        return _AlignedResult()
+
+    mock.transcribe.side_effect = _transcribe
+    return mock
+
+
+@pytest.fixture
+def test_parakeet_engine(test_config, mock_parakeet_model, monkeypatch):
+    """ParakeetEngine wired with the mock model — does not import parakeet-mlx."""
+    from src.transcription.engine import ParakeetEngine
+    test_config.transcription_engine = "parakeet"
+    engine = ParakeetEngine(test_config, test_mode=True)
+    engine.parakeet = mock_parakeet_model
+    return engine
