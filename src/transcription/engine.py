@@ -323,11 +323,6 @@ class ParakeetEngine:
     CHUNK_DURATION = 120
     OVERLAP_DURATION = 15
 
-    # Punctuation token characters that are "naturally" attached to the
-    # prior word in formatted text (no space prepended). The whitespace
-    # normalizer is intentionally simple — see spec.
-    _PUNCTUATION_HINTS = frozenset(",.!?;:")
-
     def __init__(self, config: Config, test_mode: bool = False):
         self.config = config
         self.timeout_seconds = config.transcribe_timeout

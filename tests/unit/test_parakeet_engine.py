@@ -1,16 +1,14 @@
 """Tests for ParakeetEngine.
 
 Notes for implementers:
-- `from parakeet_mlx import from_pretrained` is imported lazily inside
-  `ParakeetEngine._load_model`. That means the patch target is
-  `parakeet_mlx.from_pretrained`, NOT `src.transcription.engine.from_pretrained`.
+- `parakeet_mlx` is imported lazily inside `ParakeetEngine._load_model`
+  via `import parakeet_mlx` + attribute access. The patch target is
+  `parakeet_mlx` in `sys.modules`, NOT `src.transcription.engine.from_pretrained`.
 - We never import `parakeet_mlx` in tests — the lazy import is what keeps
   Linux/CI clean.
 """
 
-import os
 import sys
-import platform
 import wave
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -43,9 +41,12 @@ def parakeet_config():
 def test_engine_loads_in_test_mode_without_parakeet_mlx_import(parakeet_config):
     """test_mode must not import parakeet_mlx — Linux/CI must stay green."""
     from src.transcription.engine import ParakeetEngine
+    before = "parakeet_mlx" in sys.modules
     engine = ParakeetEngine(parakeet_config, test_mode=True)
     assert engine.parakeet is not None  # MockParakeetModel was set
-    assert "parakeet_mlx" not in sys.modules or True  # tolerate prior imports; the engine itself didn't import it
+    # If parakeet_mlx wasn't loaded before, test_mode boot must not load it.
+    if not before:
+        assert "parakeet_mlx" not in sys.modules
 
 
 def test_transcribe_returns_standard_segment_shape(test_parakeet_engine, tmp_path):

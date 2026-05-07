@@ -244,6 +244,8 @@ def test_parakeet_engine(test_config, mock_parakeet_model, monkeypatch):
     """ParakeetEngine wired with the mock model — does not import parakeet-mlx."""
     from src.transcription.engine import ParakeetEngine
     test_config.transcription_engine = "parakeet"
-    engine = ParakeetEngine(test_config, test_mode=True)
+    # test_mode=False: skip the inline MockParakeetModel boot; we override
+    # `engine.parakeet` with the conftest mock immediately afterwards.
+    engine = ParakeetEngine(test_config, test_mode=False)
     engine.parakeet = mock_parakeet_model
     return engine
