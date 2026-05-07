@@ -26,9 +26,11 @@ Expose a Claude Code user-scope skill that, when the user asks Claude to transcr
 ```yaml
 ---
 name: transcribe-locally
-description: Use when the user asks to transcribe a video or audio file on their local machine (mp4, mov, m4v, wav, mp3, m4a, aac). Routes through Jim's local_video_transcriber project at ~/projects/local_video_transcriber — prefers the warm model server on :8000 when running, auto-starts it if not. Speaker diarization is opt-in: only enabled when the user explicitly asks for speaker labels.
+description: "Use when the user asks to transcribe a video or audio file on their local machine (mp4, mov, m4v, wav, mp3, m4a, aac). Routes through Jim's local_video_transcriber project at ~/projects/local_video_transcriber — prefers the warm model server on :8000 when running, auto-starts it if not. Speaker diarization is opt-in: only enabled when the user explicitly asks for speaker labels."
 ---
 ```
+
+The description value is double-quoted because it contains a `: ` sequence (`opt-in: only enabled`) that strict YAML parsers (e.g., GitHub's) interpret as a nested mapping. Claude Code's loader is more permissive, but quoting keeps the file portable.
 
 The `description` is the only trigger Claude reads when scanning available skills. Phrases the skill should fire on: "transcribe this video", "transcribe foo.mp4", "get a transcript of …", "what did they say in this recording", "who said what in this interview".
 
