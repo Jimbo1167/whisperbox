@@ -5,6 +5,7 @@ import pytest
 from src.config import Config
 from src.transcription.engine import (
     ASREngine,
+    ParakeetEngine,
     WhisperEngine,
     make_asr_engine,
 )
@@ -25,8 +26,6 @@ def test_factory_returns_whisper_engine_for_explicit_whisper_config():
 
 
 def test_factory_returns_parakeet_engine_when_selected():
-    from src.transcription.engine import ParakeetEngine
-
     cfg = Config(transcription_engine="parakeet")
     engine = make_asr_engine(cfg, test_mode=True)
     assert isinstance(engine, ParakeetEngine)
