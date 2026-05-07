@@ -23,26 +23,34 @@ Considered and rejected: `onnx-asr` (cross-platform, would have let Linux/Docker
 
 ## Architecture
 
-`src/transcription/engine.py` is refactored to expose a small protocol with two implementations and a factory. The output shape is unchanged from today, so `transcriber.py` and the diarization alignment code work without modification.
+`src/transcription/engine.py` is refactored to expose a small **batch-only** protocol with two implementations and a factory. The output shape is unchanged from today, so `transcriber.py` and the diarization alignment code work without modification.
 
 ```python
 class ASREngine(Protocol):
+    """Batch-only ASR contract. Streaming is a Whisper-only extension; see below."""
     def ensure_model_loaded(self) -> None: ...
     def transcribe(self, audio_path: str) -> List[Dict[str, Any]]: ...
 
-class WhisperEngine:        # current TranscriptionEngine, renamed; retains streaming
-class ParakeetEngine:       # new
+class WhisperEngine:        # current TranscriptionEngine, renamed; retains streaming methods
+class ParakeetEngine:       # new — batch-only
 
 def make_asr_engine(config, test_mode=False) -> ASREngine:
     if config.transcription_engine == "parakeet":
         return ParakeetEngine(config, test_mode=test_mode)
     return WhisperEngine(config, test_mode=test_mode)
 
-# Backward-compat alias — preserves existing imports and the 91-test suite.
+# Backward-compat alias — preserves existing imports and the existing test suite.
 TranscriptionEngine = WhisperEngine
 ```
 
 `src/transcriber.py` constructs the engine via `make_asr_engine(self.config, test_mode=test_mode)` instead of instantiating `TranscriptionEngine` directly.
+
+### Streaming is Whisper-only — explicit contract
+
+`ASREngine` deliberately does not declare `transcribe_stream` or `start_async_transcription`. Streaming is a Whisper-only extension, not part of the cross-engine contract. Two-layer guard so the failure mode is clear, not an `AttributeError`:
+
+1. **Upstream guard in `transcriber.py`.** `transcribe_stream` and `transcribe_stream_with_diarization` check `config.transcription_engine == "whisper"` first; if not, they raise `NotImplementedError("Streaming is only supported with TRANSCRIPTION_ENGINE=whisper. Use transcribe() for batch transcription with Parakeet.")` before touching the engine.
+2. **Defensive stubs on `ParakeetEngine`.** `transcribe_stream` and `start_async_transcription` are defined and raise the same `NotImplementedError`. This keeps the surface honest if someone bypasses the upstream guard later.
 
 ### Output shape (unchanged contract)
 
@@ -62,15 +70,13 @@ Both engines return `List[Dict[str, Any]]`:
 
 The diarization alignment in `transcriber.py:_combine_segments_with_speakers` overlaps segment-level ranges (not words), so any segment-shaped output works. Word timestamps remain populated for SRT/VTT/JSON formatters.
 
-### Streaming
-
-`WhisperEngine.transcribe_stream` and `start_async_transcription` are preserved unchanged. `ParakeetEngine` does not implement streaming — calling those paths with `engine=parakeet` raises a clear error pointing the user at the batch path. `parakeet-mlx` does not natively support incremental decoding; adding it is a meaningful follow-up if needed.
-
 ## ParakeetEngine internals
 
 ### Loading
 
 - `from parakeet_mlx import from_pretrained` is imported lazily inside `_load_model`, not at module top. Importing the module on Linux/Docker stays cheap and fails only when actually invoked.
+- **Pinned API surface:** validated against `parakeet-mlx==0.5.1`. The token API in MLX-port libraries can churn (`AlignedResult.sentences[].tokens[].text/start/end`) — version pin and one mapping function isolate the risk. Bumping the pin requires re-validating the mapping in `tests/unit/test_parakeet_engine.py`.
+- **Test patching note:** because `from_pretrained` is imported lazily inside `_load_model`, the patch target is `parakeet_mlx.from_pretrained`, **not** `src.transcription.engine.from_pretrained`. Tests document this inline.
 - `from_pretrained(config.parakeet_model)` accepts either an HF model id or a local path. Default: `mlx-community/parakeet-tdt-0.6b-v3`. First run auto-downloads ~600MB to `~/.cache/huggingface/`.
 
 ### Long-form chunking
@@ -84,14 +90,27 @@ The diarization alignment in `transcriber.py:_combine_segments_with_speakers` ov
 - sentence → segment (one transcribed segment per sentence)
 - sentence.tokens → segment.words (token.text → word.word)
 
+**Word whitespace normalization.** `faster-whisper` returns words with a leading space (e.g. `" hello"`), so downstream formatters that do `"".join(w["word"] for w in words)` produce correctly-spaced text. Parakeet/NeMo BPE tokens typically do not include the leading space. To preserve the existing output contract for SRT/VTT/JSON formatters, `ParakeetEngine` normalizes token text on the way out: if a token's text does not begin with a space and it is not the first word in its segment, prepend a single space. This keeps formatter behavior identical across engines without touching `src/output/`.
+
+### Timeout
+
+`ParakeetEngine.transcribe` wraps the parakeet-mlx call in the same `with timeout(self.timeout_seconds, "Transcription timed out")` context manager that `WhisperEngine` uses today (`engine.py:154`). The existing `TRANSCRIBE_TIMEOUT` env var applies to both engines.
+
+### Device flags
+
+`FORCE_CPU` and the MPS/CUDA detection in the existing engine are Whisper-only — MLX runs on Apple Silicon with no equivalent knob. If `TRANSCRIPTION_ENGINE=parakeet` and `FORCE_CPU=true` are both set, `ParakeetEngine.__init__` logs a warning ("FORCE_CPU has no effect on Parakeet (MLX); flag is Whisper-only") and proceeds. The README documents this in the engines section.
+
 ### Caching
 
-`CacheManager` cache keys today use `prefix="transcription"` regardless of engine, which means switching engines would return stale cross-engine cache hits. Both engines now pass an engine identifier into the prefix:
+`CacheManager.cache_transcription` and `get_cached_transcription` (`src/cache/manager.py:264, 295`) hardcode `prefix="transcription"` and engines never pass anything in. Switching engines would silently return stale cross-engine cache hits. Two changes:
 
-- `WhisperEngine`: `transcription-whisper-{whisper_model_size}`
-- `ParakeetEngine`: `transcription-parakeet-{parakeet_model_id_slug}`
+1. **CacheManager API:** add a defaulted `engine_id: str = "whisper"` parameter to both `cache_transcription` and `get_cached_transcription`. The default preserves behavior for any external caller; in-tree callers always pass an explicit value. The methods build the prefix as `f"transcription-{engine_id}"` before calling `_generate_cache_key`.
 
-This is the smallest change that prevents the bug. The cache-manager prefix wiring already supports it (the `prefix` argument is just a string).
+2. **Engine identifiers:**
+   - `WhisperEngine`: `engine_id = f"whisper-{self.whisper_model_size}"`
+   - `ParakeetEngine`: `engine_id = f"parakeet-{_slug(self.parakeet_model)}"`
+
+3. **Slug rule (mandatory):** `parakeet_model` may be `mlx-community/parakeet-tdt-0.6b-v3` (HF id with `/`) or an absolute local path. Both forms must produce filesystem-safe cache keys. `_slug(s)` is `re.sub(r"[^A-Za-z0-9._-]", "_", s)`. Defined once in `engine.py` (or a small helper module) and used wherever the model id touches a filename.
 
 ### Test mode
 
@@ -99,17 +118,21 @@ Mirrors the existing `MockWhisperModel` pattern. `ParakeetEngine` in `test_mode=
 
 ## Configuration
 
-`src/config.py` adds:
+`src/config.py` adds three coordinated changes (matching the existing patterns in that file):
 
-```python
-self.transcription_engine = os.getenv("TRANSCRIPTION_ENGINE", "whisper").strip().lower()
-self.parakeet_model = os.getenv("PARAKEET_MODEL", "mlx-community/parakeet-tdt-0.6b-v3")
-```
+1. **New env-var reads in `__init__`:**
+   ```python
+   self.transcription_engine = os.getenv("TRANSCRIPTION_ENGINE", "whisper").strip().lower()
+   self.parakeet_model = os.getenv("PARAKEET_MODEL", "mlx-community/parakeet-tdt-0.6b-v3")
+   ```
 
-`Config.validate()` adds:
+2. **`__init__(**overrides)` whitelist:** `transcription_engine` and `parakeet_model` are accepted as override kwargs (mirrors how `whisper_model`, `language`, etc. are handled at `config.py:67-78`). Tests construct configs via overrides; missing this would force tests to use env-var monkeypatching.
 
-- `transcription_engine in {"whisper", "parakeet"}`, else fail.
-- If `transcription_engine == "parakeet"`: require `sys.platform == "darwin"` and `platform.machine() == "arm64"`. On any other platform, fail with: *"Parakeet requires Apple Silicon (macOS arm64). Set TRANSCRIPTION_ENGINE=whisper or run on macOS arm64."*
+3. **`to_dict()`:** both new fields are added so the debug log at `config.py:80` reflects them.
+
+4. **`Config.validate()`** — preserves the existing **return-False-and-log** pattern (`config.py:121-138`), does not raise:
+   - If `self.transcription_engine not in {"whisper", "parakeet"}`: log error, return `False`.
+   - If `self.transcription_engine == "parakeet"`: require `sys.platform == "darwin"` and `platform.machine() == "arm64"`. Otherwise log at error level: *"Parakeet requires Apple Silicon (macOS arm64). Set TRANSCRIPTION_ENGINE=whisper or run on macOS arm64."* and return `False`.
 
 `PARAKEET_MODEL` accepts either an HF id or a local absolute path — same input shape `parakeet-mlx.from_pretrained` accepts.
 
@@ -135,7 +158,7 @@ The marker means:
   - Config validation rejects `engine=parakeet` on non-darwin / non-arm64.
 - **New fixtures** in `tests/conftest.py`: `mock_parakeet_model`, `test_parakeet_engine`.
 - **One end-to-end test** in `tests/integration/test_transcriber.py` parametrized over `engine in ["whisper", "parakeet"]`, asserting the same output shape and that diarization combination produces speaker-labeled output for both engines.
-- **Existing 91 tests untouched.** The `TranscriptionEngine = WhisperEngine` alias keeps existing imports valid; the default engine remains `whisper`.
+- **All existing tests untouched.** The `TranscriptionEngine = WhisperEngine` alias keeps existing imports valid; the default engine remains `whisper`.
 
 ## README updates
 
@@ -150,8 +173,8 @@ A new "Transcription engines" section documents:
 
 1. `TRANSCRIPTION_ENGINE=parakeet python -m src.transcribe <file>` produces a transcript in the same output formats (txt/srt/vtt/json/pretty) as the Whisper path.
 2. Diarization (`pyannote`) still produces speaker-labeled output with Parakeet.
-3. All 91 existing tests pass; new tests cover the Parakeet path with mocks.
-4. README documents the new env vars, the auto-download, the platform constraint, and the Handy-weights caveat.
+3. All existing tests pass; new tests cover the Parakeet path with mocks.
+4. README documents the new env vars, the auto-download, the platform constraint, that `FORCE_CPU` is Whisper-only, and the Handy-weights caveat.
 
 ## Risks & flagged tradeoffs
 
