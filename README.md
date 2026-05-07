@@ -170,7 +170,9 @@ make docker-run
 Edit the `.env` file to configure:
 
 - `HF_TOKEN`: Your HuggingFace token for accessing models
+- `TRANSCRIPTION_ENGINE`: ASR engine to use (`whisper` or `parakeet`, default `whisper`). See [Transcription engines](#transcription-engines) below.
 - `WHISPER_MODEL`: Whisper model size (tiny, base, small, medium, large)
+- `PARAKEET_MODEL`: HF model id or local path to MLX-format weights (default `mlx-community/parakeet-tdt-0.6b-v3`). Only used when `TRANSCRIPTION_ENGINE=parakeet`.
 - `LANGUAGE`: Target language for transcription (default: en)
 - `OUTPUT_FORMAT`: Transcript format (txt, pretty, srt, vtt, json)
 - `INCLUDE_DIARIZATION`: Enable/disable speaker diarization
@@ -178,6 +180,43 @@ Edit the `.env` file to configure:
 - `CACHE_EXPIRATION`: Cache expiration time in seconds
 - `MAX_CACHE_SIZE`: Maximum cache size in bytes
 - Various timeout settings
+
+## Transcription engines
+
+Two ASR engines are selectable via `TRANSCRIPTION_ENGINE`:
+
+### `whisper` (default)
+
+`faster-whisper` running `large-v3-turbo` by default. Works on macOS, Linux, and Docker. Supports 99+ languages. Streaming and async streaming are supported.
+
+### `parakeet` (Apple Silicon only)
+
+NVIDIA Parakeet-TDT-0.6B-v3 via [`parakeet-mlx`](https://github.com/senstella/parakeet-mlx). On macOS arm64, this is roughly an order of magnitude faster than Whisper on CPU and produces lower WER on the Open ASR Leaderboard for English / ~25 European languages. Batch only — no streaming.
+
+Enable:
+
+```bash
+export TRANSCRIPTION_ENGINE=parakeet
+```
+
+#### First-run model download
+
+On first use, parakeet-mlx auto-downloads `mlx-community/parakeet-tdt-0.6b-v3` (~600MB) to `~/.cache/huggingface/`. To use a different MLX checkpoint or a pre-downloaded local copy:
+
+```bash
+# HuggingFace id
+export PARAKEET_MODEL=mlx-community/parakeet-tdt-0.6b-v3
+
+# Or absolute local path to an MLX checkpoint
+export PARAKEET_MODEL=/path/to/local/mlx-checkpoint
+```
+
+#### Caveats
+
+- **Apple Silicon only.** Setting `TRANSCRIPTION_ENGINE=parakeet` on Linux, Docker, or Intel macOS is rejected at config validation. The `parakeet-mlx` dependency in `requirements.txt` carries a platform marker so non-Apple-Silicon installs skip it entirely.
+- **`FORCE_CPU` is Whisper-only.** MLX runs on Apple Silicon with no equivalent knob; if `FORCE_CPU=true` is set with `engine=parakeet`, a warning is logged and the flag is ignored.
+- **Streaming is Whisper-only.** Calling streaming entry points with `engine=parakeet` raises `NotImplementedError`. Use the batch `transcribe()` path.
+- **Handy weights are not compatible.** Handy ships INT8 ONNX weights; `parakeet-mlx` requires MLX-format weights. Users wanting to reuse Handy's weights would need a different runtime (e.g. `onnx-asr`) — out of scope here.
 
 ## Usage
 
