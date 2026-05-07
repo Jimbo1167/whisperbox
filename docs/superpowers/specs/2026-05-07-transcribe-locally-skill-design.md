@@ -26,7 +26,7 @@ Expose a Claude Code user-scope skill that, when the user asks Claude to transcr
 ```yaml
 ---
 name: transcribe-locally
-description: Use when the user asks to transcribe a video or audio file on their local machine (mp4, mov, wav, mp3, m4a, aac, etc.). Routes through Jim's local_video_transcriber project at ~/projects/local_video_transcriber — prefers the warm model server on :8000 when running, auto-starts it if not. Handles speaker diarization when the user signals interest in "who said what".
+description: Use when the user asks to transcribe a video or audio file on their local machine (mp4, mov, m4v, wav, mp3, m4a, aac). Routes through Jim's local_video_transcriber project at ~/projects/local_video_transcriber — prefers the warm model server on :8000 when running, auto-starts it if not. Speaker diarization is opt-in: only enabled when the user explicitly asks for speaker labels.
 ---
 ```
 
@@ -34,11 +34,13 @@ The `description` is the only trigger Claude reads when scanning available skill
 
 ## Behavior
 
-### 1. Project pin
+### 1. Project pin and path resolution
 
-Project lives at `~/projects/local_video_transcriber`. If `pwd` doesn't match, `cd` there for the duration of the run. The pin is explicit in the skill body, so this is not a silent assumption — it's the documented contract of the skill.
+Project lives at `~/projects/local_video_transcriber`. If `~/projects/local_video_transcriber` does not exist on disk, stop and report that the project is missing.
 
-If `~/projects/local_video_transcriber` does not exist on disk, stop and report that the project is missing.
+Order matters: **resolve the user's input file to an absolute path *before* `cd`-ing into the project.** Otherwise a relative path like `./meeting.mp4` from the user's current directory will be silently re-resolved against the project root and fail. Concretely: capture `realpath` (or equivalent) of the user-provided path first, then `cd ~/projects/local_video_transcriber` for the rest of the run.
+
+The pin is explicit in the skill body, so this is not a silent assumption — it's the documented contract of the skill.
 
 ### 2. Preflight (one Bash call, fail fast)
 
@@ -46,47 +48,59 @@ In order:
 
 1. `venv/` directory exists. If not → stop, surface `make setup`.
 2. `.env` file exists. If not → stop, surface `cp .env.example .env`.
-3. The input file path the user named exists, and its extension is one of `mp4, mov, m4v, wav, mp3, m4a, aac`. If not → stop, surface what was wrong.
+3. The input file (resolved to absolute path per §1) exists, and its extension is one of `mp4, mov, m4v, wav, mp3, m4a, aac`. If not → stop, surface what was wrong.
 4. If diarization is on for this run: `.env` contains a non-placeholder `HF_TOKEN=` line (i.e. not `your_huggingface_token_here`). If missing → stop, tell user to set HF_TOKEN.
 
 When preflight fails, the skill reports the issue and the fix command. It never runs setup or token-installation steps itself.
 
 ### 3. Diarization decision
 
-Off by default. Turn on (`--diarize` / `make diarize`) when the user's request mentions any of: "speakers", "who said what", "diarize", "diarization", "interview", "meeting", "multiple voices", "two people", "panel", "conversation between …".
+Off by default. Turn on **only when the user explicitly asks for speaker information** — e.g. "diarize", "with speakers", "label the speakers", "who said what", "separate by speaker", "distinguish voices".
 
-If the request is ambiguous (e.g. "transcribe this call") and diarization isn't obviously needed, default to off. The skill body lists this rule explicitly so Claude doesn't re-derive it each invocation.
+Words like "interview", "meeting", "call", or "conversation" are *not* sufficient on their own — those describe the recording, not what the user wants out of the transcript. Diarization is slower and requires `HF_TOKEN`, so the cost of a false positive is real (silently slower runs, or hard failures for users who haven't set the token). When in doubt, default off.
+
+The skill body lists this rule explicitly so Claude doesn't re-derive it each invocation.
 
 ### 4. Routing: warm vs. cold
 
-The skill calls the Python CLI directly (not `make` targets) so that the diarization flag works uniformly across both paths. All commands run inside the project venv:
+The skill calls the **Click CLI at `scripts/transcribe.py`** directly. It does **not** use the `make transcribe` / `make diarize` / `make client-transcribe` targets. This is a real divergence, not a stylistic choice — see the note below.
 
-```fish
+All commands run inside the project venv:
+
+```bash
 . venv/bin/activate
 ```
 
-Probe the model server:
+Probe the model server (one call, exit code is the signal — `curl -sf` returns non-zero on any non-2xx, so no need to inspect the status code):
 
-```fish
+```bash
 curl -sf -m 2 http://localhost:8000/health
 ```
 
-- **2xx** → server is warm. Run:
+- **Exit 0** → server is warm. Run:
   ```
-  python -m scripts.transcribe client transcribe "<file>" [--diarize]
+  python scripts/transcribe.py client transcribe "<absolute-input-path>" [--diarize]
   ```
-- **non-2xx / connection refused** → start the server in the background. The Makefile's `make server` target runs in the foreground, so the skill backgrounds it explicitly:
+- **Non-zero / connection refused** → start the model server in the background, **bypassing the Makefile so the backgrounded PID is the actual python process** (otherwise `$!` is `make`, and killing it doesn't stop the python child). Concretely:
+  ```bash
+  nohup python scripts/model_server.py --host 0.0.0.0 --port 8000 \
+      > /tmp/local_video_transcriber-server.log 2>&1 &
+  server_pid=$!
   ```
-  nohup make server > /tmp/local_video_transcriber-server.log 2>&1 &
-  ```
-  Then poll `/health` every ~2s until 2xx, capped at 60s total. Once warm, route via the warm command above.
-  - If the 60s cap is hit without the server coming up, kill the backgrounded process and fall back to a one-shot run:
+  (The skill executes through Claude's Bash tool, which is bash, even though Jim's interactive shell is fish.)
+  Then poll `/health` every ~2s until 2xx, capped at 60s total. Once warm, log "server is now warm at :8000" and route via the warm command above. The next invocation's preflight will find it.
+  - If the 60s cap is hit without the server becoming healthy, `kill $server_pid` (and `kill -9` after a brief grace period if it doesn't exit), then fall back to a one-shot run:
     ```
-    python -m scripts.transcribe transcribe "<file>" [--diarize]
+    python scripts/transcribe.py transcribe "<absolute-input-path>" [--diarize]
     ```
-- The skill **does not stop a server it started** after the run completes. Leaving it running is the desired behavior.
+- The skill **does not stop a server it started** when the run *succeeds*. Leaving it warm is the desired behavior.
 
-Note: `make transcribe` / `make diarize` / `make client-transcribe` are convenient shortcuts but the skill prefers the underlying `python -m scripts.transcribe …` form because the Makefile doesn't expose `--diarize` on the client target. Routing through one CLI keeps the skill body uniform.
+**Note on the Makefile divergence.** This project has two parallel CLIs:
+
+- `make transcribe` and `make diarize` invoke `transcribe_video.py`, a thin script with its own `argparse` that supports only `input_path` and `-o/--output`. It pulls model size, language, format, and diarization from the `.env` (with `INCLUDE_DIARIZATION=true` injected as an env var for `make diarize`).
+- `python scripts/transcribe.py …` is a Click CLI with full options: `--diarize`, `--model`, `--language`, `--format` (including `pretty`), plus subcommands for `client`, `stream`, `batch`, `server`.
+
+The skill bypasses `make transcribe` because `transcribe_video.py` is a separate code path that doesn't expose the flags the skill needs. The Click CLI is the only path that gives uniform `--diarize` (and other flag) handling across the cold and warm paths.
 
 ### 5. Model selection
 
@@ -113,8 +127,8 @@ When the transcription errors (non-zero exit from the underlying CLI):
 | `.env` missing | Stop, surface `cp .env.example .env`. |
 | Input file missing or unsupported extension | Stop, report which. |
 | Diarization on but `HF_TOKEN` unset/placeholder | Stop, tell user to set token. |
-| Server probe fails | Start `make server` in background, poll /health up to 60s. |
-| Server start times out | Kill backgrounded server, fall back to one-shot `python -m scripts.transcribe transcribe`. |
+| Server probe fails | Start `python scripts/model_server.py …` in background (capture PID), poll /health up to 60s. |
+| Server start times out | Kill the captured server PID, fall back to one-shot `python scripts/transcribe.py transcribe`. |
 | Transcription CLI errors | Relay stderr, don't retry. |
 
 ## Things the skill explicitly does not do
