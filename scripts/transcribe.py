@@ -32,8 +32,10 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
-# Define output format options
-OUTPUT_FORMATS = ['txt', 'srt', 'vtt', 'json', 'pretty']
+# Define output format options.
+# - `vtt-voice` emits WebVTT with `<v Speaker>...</v>` voice spans (YouTube-style).
+# - `json3` emits YouTube's auto-caption wire format, round-trippable via `yt-dlp --convert-subs`.
+OUTPUT_FORMATS = ['txt', 'srt', 'vtt', 'vtt-voice', 'json', 'json3', 'pretty']
 
 # Define model size options
 MODEL_SIZES = ['tiny', 'base', 'small', 'medium', 'large']
