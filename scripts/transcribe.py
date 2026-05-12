@@ -19,6 +19,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 
 from src.config import Config
 from src.service import TranscriptionService
+from src.utils.progress_events import JsonlProgressEmitter
 from src.utils.resource_monitor import ResourceMonitor
 
 # Configure logging
@@ -37,6 +38,11 @@ OUTPUT_FORMATS = ['txt', 'srt', 'vtt', 'json', 'pretty']
 
 # Define model size options
 MODEL_SIZES = ['tiny', 'base', 'small', 'medium', 'large']
+
+# Progress reporting modes. ``pretty`` is the legacy click-colored output;
+# ``jsonl`` emits machine-readable events on stderr for programmatic callers;
+# ``none`` silences both.
+PROGRESS_MODES = ['pretty', 'jsonl', 'none']
 
 def print_version(ctx, param, value):
     """Print version information and exit."""
@@ -71,23 +77,28 @@ def cli(ctx, verbose):
 @click.option('--diarize', '-d', is_flag=True, help='Include speaker diarization.')
 @click.option('--model', '-m', type=click.Choice(MODEL_SIZES), help='Whisper model size.')
 @click.option('--language', '-l', help='Language code (e.g., en, fr, de).')
-@click.option('--format', '-f', 'output_format', type=click.Choice(OUTPUT_FORMATS), 
+@click.option('--format', '-f', 'output_format', type=click.Choice(OUTPUT_FORMATS),
               help='Output format.')
-def transcribe(input_path, output, diarize, model, language, output_format):
+@click.option('--progress', 'progress_mode', type=click.Choice(PROGRESS_MODES),
+              default='pretty', show_default=True,
+              help='Progress reporting mode. Use "jsonl" to emit one JSON event '
+                   'per line on stderr for programmatic callers.')
+def transcribe(input_path, output, diarize, model, language, output_format, progress_mode):
     """Transcribe an audio or video file.
-    
+
     This command transcribes the given audio or video file and saves the result
     to the specified output file. If no output file is specified, the result is
     saved to a file with the same name as the input file but with a different
     extension based on the output format.
-    
+
     Examples:
         transcribe video.mp4
         transcribe audio.mp3 --output transcript.txt
         transcribe interview.wav --diarize --model medium
+        transcribe meeting.mp4 --progress jsonl 2> events.jsonl
     """
     start_time = time.time()
-    
+
     # Create configuration
     config_kwargs = {}
     if model:
@@ -98,37 +109,67 @@ def transcribe(input_path, output, diarize, model, language, output_format):
         config_kwargs['output_format'] = output_format
     if diarize:
         config_kwargs['include_diarization'] = True
-    
+
     config = Config(**config_kwargs)
-    
+
     service = TranscriptionService(config)
-    
+
     # Generate output path if not provided
     if not output:
         input_file = Path(input_path)
         output_dir = Path('transcripts')
         output_dir.mkdir(exist_ok=True)
-        
+
         ext = output_format or config.output_format or 'txt'
-            
+
         output = str(output_dir / f"{input_file.stem}.{ext}")
-    
-    # Monitor resources during transcription
-    with ResourceMonitor() as monitor:
-        # Perform transcription
-        click.echo(click.style(f"Transcribing {input_path}...", fg="green"))
-        click.echo(click.style(f"Saving transcript to {output}...", fg="green"))
-        service.transcribe_file(input_path, output_path=output)
-    
-    # Print resource usage
+
+    jsonl_emitter: Optional[JsonlProgressEmitter] = None
+    if progress_mode == 'jsonl':
+        # Keep stderr parseable: silence INFO logs from the pipeline and skip
+        # the human-friendly click.echo lines below.
+        logging.getLogger().setLevel(logging.WARNING)
+        jsonl_emitter = JsonlProgressEmitter()
+        jsonl_emitter.emit_started(
+            input=input_path,
+            output=output,
+            format=config.output_format,
+            diarize=bool(config.include_diarization),
+            model=config.whisper_model_size,
+            language=config.language,
+        )
+
+    try:
+        with ResourceMonitor() as monitor:
+            if progress_mode != 'jsonl':
+                click.echo(click.style(f"Transcribing {input_path}...", fg="green"))
+                click.echo(click.style(f"Saving transcript to {output}...", fg="green"))
+            result = service.transcribe_file(
+                input_path,
+                output_path=output,
+                progress_callback=jsonl_emitter,
+            )
+    except Exception as exc:
+        if jsonl_emitter is not None:
+            jsonl_emitter.emit_error(str(exc))
+        raise
+
+    if jsonl_emitter is not None:
+        jsonl_emitter.emit_completed(
+            output=result.get("output_file", output),
+            segments=len(result.get("segments", [])),
+            processing_time=result.get("processing_time"),
+        )
+        return
+
+    # Pretty-mode resource + timing summary (legacy behavior).
     metrics = monitor.get_average_metrics()
     click.echo(click.style("\nResource usage:", fg="blue"))
     click.echo(f"  CPU: {metrics['cpu_percent']:.1f}%")
     click.echo(f"  Memory: {metrics['memory_percent']:.1f}%")
     if metrics.get('gpu_memory_percent', 0) > 0:
         click.echo(f"  GPU Memory: {metrics['gpu_memory_percent']:.1f}%")
-    
-    # Print elapsed time
+
     elapsed_time = time.time() - start_time
     minutes, seconds = divmod(elapsed_time, 60)
     click.echo(click.style(f"\nTranscription completed in {int(minutes)}m {seconds:.2f}s", fg="green"))
