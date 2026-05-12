@@ -46,8 +46,12 @@ class OutputFormatter:
                 self._save_srt(segments, output_path)
             elif self.format == "vtt":
                 self._save_vtt(segments, output_path)
+            elif self.format == "vtt-voice":
+                self._save_vtt_voice(segments, output_path)
             elif self.format == "json":
                 self._save_json(segments, output_path)
+            elif self.format == "json3":
+                self._save_json3(segments, output_path)
             elif self.format == "pretty":
                 self._save_pretty(segments, output_path)
             else:
@@ -66,8 +70,12 @@ class OutputFormatter:
             return self._format_srt(segments)
         if self.format == "vtt":
             return self._format_vtt(segments)
+        if self.format == "vtt-voice":
+            return self._format_vtt_voice(segments)
         if self.format == "json":
             return self._format_json(segments)
+        if self.format == "json3":
+            return self._format_json3(segments)
         if self.format == "pretty":
             return self._format_pretty(segments)
         raise ValueError(f"Unsupported output format: {self.format}")
@@ -159,6 +167,41 @@ class OutputFormatter:
             lines.append("")
         return "\n".join(lines).rstrip() + "\n"
 
+    def _escape_vtt_text(self, text: str) -> str:
+        # WebVTT cue payload only requires ``&``, ``<``, and ``>`` to be
+        # encoded so they're not parsed as cue tags.
+        return (
+            text.replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+        )
+
+    def _vtt_voice_id(self, speaker: str) -> str:
+        # Voice IDs cannot contain ``<``, ``>``, or newlines.
+        cleaned = re.sub(r"\s+", " ", speaker.replace("<", "").replace(">", "")).strip()
+        return cleaned or "Speaker"
+
+    def _format_vtt_voice(self, segments: List[Tuple[float, float, str, str]]) -> str:
+        """WebVTT with ``<v Speaker>...</v>`` voice spans (YouTube-style)."""
+        lines = ["WEBVTT", ""]
+        for i, (start, end, text, speaker) in enumerate(segments, 1):
+            lines.append(str(i))
+            lines.append(
+                f"{self._format_timestamp(start, True)} --> {self._format_timestamp(end, True)}"
+            )
+            escaped = self._escape_vtt_text(text)
+            if speaker:
+                voice = self._vtt_voice_id(speaker)
+                lines.append(f"<v {voice}>{escaped}</v>")
+            else:
+                lines.append(escaped)
+            lines.append("")
+        return "\n".join(lines).rstrip() + "\n"
+
+    def _save_vtt_voice(self, segments: List[Tuple[float, float, str, str]], output_path: str):
+        with open(output_path, "w", encoding="utf-8") as f:
+            f.write(self._format_vtt_voice(segments))
+
     def _format_json(self, segments: List[Tuple[float, float, str, str]]) -> str:
         json_data = []
         for start, end, text, speaker in segments:
@@ -169,6 +212,43 @@ class OutputFormatter:
                 "speaker": speaker
             })
         return json.dumps(json_data, ensure_ascii=False, indent=2)
+
+    def _format_json3(self, segments: List[Tuple[float, float, str, str]]) -> str:
+        """YouTube auto-caption wire format ("json3"), consumable by yt-dlp.
+
+        Schema::
+
+            {"wireMagic": "pb3",
+             "events": [
+                 {"tStartMs": <int>, "dDurationMs": <int>,
+                  "segs": [{"utf8": "..."}]},
+                 ...
+             ]}
+
+        Speaker labels (when present) are prefixed onto the utf8 payload —
+        the json3 wire format itself has no speaker field. Round-trip back to
+        vtt/srt via ``yt-dlp --convert-subs vtt``.
+        """
+        events = []
+        for start, end, text, speaker in segments:
+            start_ms = int(round(start * 1000))
+            end_ms = int(round(end * 1000))
+            duration_ms = max(0, end_ms - start_ms)
+            payload = f"[{speaker}] {text}" if speaker else text
+            events.append({
+                "tStartMs": start_ms,
+                "dDurationMs": duration_ms,
+                "segs": [{"utf8": payload}],
+            })
+        return json.dumps(
+            {"wireMagic": "pb3", "events": events},
+            ensure_ascii=False,
+            indent=2,
+        )
+
+    def _save_json3(self, segments: List[Tuple[float, float, str, str]], output_path: str):
+        with open(output_path, "w", encoding="utf-8") as f:
+            f.write(self._format_json3(segments))
 
     def _normalize_text(self, text: str) -> str:
         return re.sub(r"\s+", " ", text).strip()
