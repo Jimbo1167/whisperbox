@@ -64,3 +64,5 @@ transcripts/
 # benchmarks/<video_id>/<timestamp>.json are committed as artifacts.
 benchmarks/_tmp/
 
+# Local Claude Code agent state (settings.local.json, worktrees)
+.claude/
