@@ -140,14 +140,31 @@ class Transcriber:
         """
         audio_path = None
         needs_cleanup = False
-        
+
         try:
             if progress_callback:
                 progress_callback("Preparing audio", 0.05)
 
-            # Get audio path
-            audio_path, needs_cleanup = self.audio_processor.get_audio_path(input_path)
-            
+            # Overlap audio extraction (ffmpeg) with model warmup so the
+            # downstream parallel block doesn't pay a cold-load penalty. Both
+            # `ensure_model_loaded` calls are idempotent, so re-invocation
+            # inside the engines' own `transcribe`/`diarize` is a no-op.
+            with concurrent.futures.ThreadPoolExecutor(
+                max_workers=2, thread_name_prefix="model-preload"
+            ) as load_pool:
+                load_futures = [load_pool.submit(self.transcription_engine.ensure_model_loaded)]
+                if self.include_diarization:
+                    load_futures.append(
+                        load_pool.submit(self.diarization_engine.ensure_model_loaded)
+                    )
+                audio_path, needs_cleanup = self.audio_processor.get_audio_path(input_path)
+                # Executor __exit__ joins all submitted tasks before returning.
+
+            # Surface any model-load errors here so callers see them before
+            # we kick off the heavier transcribe/diarize block.
+            for future in load_futures:
+                future.result()
+
             if self.include_diarization:
                 logger.info("\nStarting transcription and diarization...")
                 if progress_callback:
