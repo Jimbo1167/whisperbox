@@ -26,7 +26,7 @@ def test_config():
 def cache_manager(test_config):
     """Create a test cache manager."""
     # Create a temporary directory for the cache
-    original_cache_dir = os.path.join(os.path.expanduser("~"), ".cache", "video_transcriber")
+    original_cache_dir = os.path.join(os.path.expanduser("~"), ".cache", "whisperbox")
     test_cache_dir = tempfile.mkdtemp()
     
     # Patch the cache directory

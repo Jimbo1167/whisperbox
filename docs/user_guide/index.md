@@ -1,6 +1,6 @@
-# Video Transcriber User Guide
+# Whisperbox User Guide
 
-Welcome to the Video Transcriber user guide. This document provides comprehensive instructions for installing, configuring, and using the Video Transcriber tool.
+Welcome to the Whisperbox user guide. This document provides comprehensive instructions for installing, configuring, and using the Whisperbox tool.
 
 ## Table of Contents
 
@@ -15,7 +15,7 @@ Welcome to the Video Transcriber user guide. This document provides comprehensiv
 
 ## Introduction
 
-Video Transcriber is a powerful Python tool for transcribing videos and audio files with speaker diarization. It processes video or audio files, transcribes the speech to text, and identifies different speakers in the conversation.
+Whisperbox is a powerful Python tool for transcribing videos and audio files with speaker diarization. It processes video or audio files, transcribes the speech to text, and identifies different speakers in the conversation.
 
 ### Key Features
 
@@ -41,8 +41,8 @@ Video Transcriber is a powerful Python tool for transcribing videos and audio fi
 ### Step 1: Clone the Repository
 
 ```bash
-git clone https://github.com/yourusername/video_transcriber.git
-cd video_transcriber
+git clone https://github.com/yourusername/whisperbox.git
+cd whisperbox
 ```
 
 ### Step 2: Set Up the Environment
@@ -73,7 +73,7 @@ Edit the `.env` file with your preferred text editor to configure the settings.
 
 ## Configuration
 
-The Video Transcriber can be configured using environment variables or a `.env` file. Here are the available configuration options:
+The Whisperbox can be configured using environment variables or a `.env` file. Here are the available configuration options:
 
 ### General Settings
 
@@ -192,7 +192,7 @@ python -m scripts.model_client transcribe path/to/your/video.mp4
 
 ## Command Line Interface
 
-The Video Transcriber provides a unified command-line interface with several subcommands:
+The Whisperbox provides a unified command-line interface with several subcommands:
 
 ### Global Options
 
@@ -301,7 +301,7 @@ Solutions:
 
 ### Logging
 
-The Video Transcriber logs information to the console by default. You can adjust the logging level in your `.env` file:
+The Whisperbox logs information to the console by default. You can adjust the logging level in your `.env` file:
 
 ```bash
 LOG_LEVEL=DEBUG  # Options: DEBUG, INFO, WARNING, ERROR
@@ -313,7 +313,7 @@ For more detailed logging, set the level to DEBUG.
 
 ### What file formats are supported?
 
-The Video Transcriber supports most video and audio formats:
+The Whisperbox supports most video and audio formats:
 - Video: mov, mp4, avi, mkv, etc. (any format supported by MoviePy)
 - Audio: wav (direct processing), mp3, m4a, aac, etc.
 

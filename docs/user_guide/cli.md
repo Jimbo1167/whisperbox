@@ -1,10 +1,10 @@
 # Command Line Interface Guide
 
-This guide provides detailed information about the Video Transcriber command-line interface (CLI) commands, options, and usage examples.
+This guide provides detailed information about the Whisperbox command-line interface (CLI) commands, options, and usage examples.
 
 ## Overview
 
-The Video Transcriber provides several command-line scripts for different use cases:
+The Whisperbox provides several command-line scripts for different use cases:
 
 1. `transcribe.py` - Unified CLI with subcommands for transcription
 2. `model_server.py` - Server for persistent model instances

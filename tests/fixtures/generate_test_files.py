@@ -1,4 +1,4 @@
-"""Script to generate test files for the video transcriber tests."""
+"""Script to generate test files for the Whisperbox tests."""
 
 import numpy as np
 from moviepy.editor import VideoFileClip, AudioFileClip, ColorClip

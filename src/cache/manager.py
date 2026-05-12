@@ -1,5 +1,5 @@
 """
-Cache manager for the video transcriber.
+Cache manager for the Whisperbox.
 
 This module provides a cache manager class that handles caching of audio files,
 transcription results, and diarization results.
@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 class CacheManager:
     """
-    Manages caching for the video transcriber.
+    Manages caching for the Whisperbox.
     
     This class provides methods for caching and retrieving:
     - Extracted audio files
@@ -41,7 +41,7 @@ class CacheManager:
         self.config = config
         
         # Set up cache directory
-        self.cache_dir = os.path.join(os.path.expanduser("~"), ".cache", "video_transcriber")
+        self.cache_dir = os.path.join(os.path.expanduser("~"), ".cache", "whisperbox")
         
         # Create subdirectories for different cache types
         self.audio_cache_dir = os.path.join(self.cache_dir, "audio")

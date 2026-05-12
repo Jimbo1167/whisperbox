@@ -5,7 +5,7 @@
 
 ## Goal
 
-Expose a Claude Code user-scope skill that, when the user asks Claude to transcribe a video or audio file on their local machine, makes Claude actually run the transcription via the `local_video_transcriber` project — without the user having to walk Claude through the steps each time.
+Expose a Claude Code user-scope skill that, when the user asks Claude to transcribe a video or audio file on their local machine, makes Claude actually run the transcription via the `whisperbox` project — without the user having to walk Claude through the steps each time.
 
 ## Non-goals
 
@@ -26,7 +26,7 @@ Expose a Claude Code user-scope skill that, when the user asks Claude to transcr
 ```yaml
 ---
 name: transcribe-locally
-description: "Use when the user asks to transcribe a video or audio file on their local machine (mp4, mov, m4v, wav, mp3, m4a, aac). Routes through Jim's local_video_transcriber project at ~/projects/local_video_transcriber — prefers the warm model server on :8000 when running, auto-starts it if not. Speaker diarization is opt-in: only enabled when the user explicitly asks for speaker labels."
+description: "Use when the user asks to transcribe a video or audio file on their local machine (mp4, mov, m4v, wav, mp3, m4a, aac). Routes through Jim's whisperbox project at ~/projects/whisperbox — prefers the warm model server on :8000 when running, auto-starts it if not. Speaker diarization is opt-in: only enabled when the user explicitly asks for speaker labels."
 ---
 ```
 
@@ -38,9 +38,9 @@ The `description` is the only trigger Claude reads when scanning available skill
 
 ### 1. Project pin and path resolution
 
-Project lives at `~/projects/local_video_transcriber`. If `~/projects/local_video_transcriber` does not exist on disk, stop and report that the project is missing.
+Project lives at `~/projects/whisperbox`. If `~/projects/whisperbox` does not exist on disk, stop and report that the project is missing.
 
-Order matters: **resolve the user's input file to an absolute path *before* `cd`-ing into the project.** Otherwise a relative path like `./meeting.mp4` from the user's current directory will be silently re-resolved against the project root and fail. Concretely: capture `realpath` (or equivalent) of the user-provided path first, then `cd ~/projects/local_video_transcriber` for the rest of the run.
+Order matters: **resolve the user's input file to an absolute path *before* `cd`-ing into the project.** Otherwise a relative path like `./meeting.mp4` from the user's current directory will be silently re-resolved against the project root and fail. Concretely: capture `realpath` (or equivalent) of the user-provided path first, then `cd ~/projects/whisperbox` for the rest of the run.
 
 The pin is explicit in the skill body, so this is not a silent assumption — it's the documented contract of the skill.
 
@@ -86,7 +86,7 @@ curl -sf -m 2 http://localhost:8000/health
 - **Non-zero / connection refused** → start the model server in the background, **bypassing the Makefile so the backgrounded PID is the actual python process** (otherwise `$!` is `make`, and killing it doesn't stop the python child). Concretely:
   ```bash
   nohup python scripts/model_server.py --host 0.0.0.0 --port 8000 \
-      > /tmp/local_video_transcriber-server.log 2>&1 &
+      > /tmp/whisperbox-server.log 2>&1 &
   server_pid=$!
   ```
   (The skill executes through Claude's Bash tool, which is bash, even though Jim's interactive shell is fish.)

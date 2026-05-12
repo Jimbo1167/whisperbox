@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Video Transcriber - Command line tool to transcribe video and audio files.
+Whisperbox - Command line tool to transcribe video and audio files.
 
-This script provides a command-line interface to the video transcriber library,
+This script provides a command-line interface to the Whisperbox library,
 allowing users to transcribe video and audio files with optional speaker diarization.
 """
 

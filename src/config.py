@@ -8,7 +8,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 class Config:
-    """Configuration class to handle all settings for the video transcriber.
+    """Configuration class to handle all settings for the Whisperbox.
     
     This class loads configuration from environment variables and provides
     validation and type conversion for the settings.

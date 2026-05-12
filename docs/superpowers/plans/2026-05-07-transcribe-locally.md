@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Ship a Claude Code user-scope skill at `~/projects/skills/skills/transcribe-locally/SKILL.md` that makes Claude run video/audio transcriptions through the `local_video_transcriber` project when the user asks for a transcript.
+**Goal:** Ship a Claude Code user-scope skill at `~/projects/skills/skills/transcribe-locally/SKILL.md` that makes Claude run video/audio transcriptions through the `whisperbox` project when the user asks for a transcript.
 
 **Architecture:** Single `SKILL.md` (markdown + YAML frontmatter) — no supporting files, no helper scripts. The skill body encodes a decision tree: project pin + path resolution → preflight → diarization decision → warm-server probe → routing → reporting. Skill is auto-discovered via the existing `~/projects/skills/skills/` → `~/.claude/skills/` symlink.
 
@@ -18,7 +18,7 @@
 
 - Create: `~/projects/skills/skills/transcribe-locally/SKILL.md`
 - Modify: `~/projects/skills/README.md` — add an entry under "Current skills"
-- Verify (read-only): `~/projects/local_video_transcriber/scripts/transcribe.py`, `~/projects/local_video_transcriber/scripts/model_server.py`, `~/projects/local_video_transcriber/.env`, `~/projects/local_video_transcriber/venv/`
+- Verify (read-only): `~/projects/whisperbox/scripts/transcribe.py`, `~/projects/whisperbox/scripts/model_server.py`, `~/projects/whisperbox/.env`, `~/projects/whisperbox/venv/`
 
 The skill is one file. Don't create supporting `.md` files; if any sub-topic becomes long enough to warrant splitting later, that's a future change.
 
@@ -33,7 +33,7 @@ The spec pins `python scripts/transcribe.py …` as the form to use. Before enco
 - [ ] **Step 1: Activate the venv and ask the CLI for help**
 
 ```bash
-cd ~/projects/local_video_transcriber
+cd ~/projects/whisperbox
 . venv/bin/activate
 python scripts/transcribe.py --help
 ```
@@ -84,10 +84,10 @@ If a server is up, stop it first (find the PID with `pgrep -f model_server.py` a
 - [ ] **Step 2: Background the server, capture its PID**
 
 ```bash
-cd ~/projects/local_video_transcriber
+cd ~/projects/whisperbox
 . venv/bin/activate
 nohup python scripts/model_server.py --host 0.0.0.0 --port 8000 \
-    > /tmp/local_video_transcriber-server.log 2>&1 &
+    > /tmp/whisperbox-server.log 2>&1 &
 server_pid=$!
 echo "server_pid=$server_pid"
 ```
@@ -104,7 +104,7 @@ for i in $(seq 1 30); do
   fi
   sleep 2
 done
-curl -sf -m 2 http://localhost:8000/health || { echo "still not healthy"; cat /tmp/local_video_transcriber-server.log | tail -40; }
+curl -sf -m 2 http://localhost:8000/health || { echo "still not healthy"; cat /tmp/whisperbox-server.log | tail -40; }
 ```
 
 Expected: prints `healthy after N polls` within ~60s on a warm machine. If it doesn't come up, read the log and fix before continuing.
@@ -160,12 +160,12 @@ Create `~/projects/skills/skills/transcribe-locally/SKILL.md` with this content:
 ```markdown
 ---
 name: transcribe-locally
-description: Use when the user asks to transcribe a video or audio file on their local machine (mp4, mov, m4v, wav, mp3, m4a, aac). Routes through Jim's local_video_transcriber project at ~/projects/local_video_transcriber — prefers the warm model server on :8000 when running, auto-starts it if not. Speaker diarization is opt-in: only enabled when the user explicitly asks for speaker labels.
+description: Use when the user asks to transcribe a video or audio file on their local machine (mp4, mov, m4v, wav, mp3, m4a, aac). Routes through Jim's whisperbox project at ~/projects/whisperbox — prefers the warm model server on :8000 when running, auto-starts it if not. Speaker diarization is opt-in: only enabled when the user explicitly asks for speaker labels.
 ---
 
 # transcribe-locally
 
-When the user asks Claude to transcribe a video or audio file on their machine, run the transcription through the `local_video_transcriber` project at `~/projects/local_video_transcriber`. Don't walk the user through the commands — just do it and tell them where the transcript ended up.
+When the user asks Claude to transcribe a video or audio file on their machine, run the transcription through the `whisperbox` project at `~/projects/whisperbox`. Don't walk the user through the commands — just do it and tell them where the transcript ended up.
 
 ## 1. Project pin and path resolution
 
@@ -238,13 +238,13 @@ Replace with:
 ```markdown
 ## 1. Project pin and path resolution
 
-The project lives at `~/projects/local_video_transcriber`. If that directory does not exist, stop and tell the user the project is missing — don't try to clone or recreate it.
+The project lives at `~/projects/whisperbox`. If that directory does not exist, stop and tell the user the project is missing — don't try to clone or recreate it.
 
 **Resolve the user's input file to an absolute path *before* `cd`-ing into the project.** If the user said `./meeting.mp4` from `~/Downloads`, the literal path won't work after `cd`, so convert it first:
 
 ```bash
 input_abs=$(realpath "<user-supplied-path>")
-cd ~/projects/local_video_transcriber
+cd ~/projects/whisperbox
 ```
 
 Use `$input_abs` everywhere downstream. Don't pass relative paths to the CLI.
@@ -279,7 +279,7 @@ After `cd`, run these checks in order. If any fails, stop and tell the user the 
 Compact one-shot version:
 
 ```bash
-cd ~/projects/local_video_transcriber || { echo "project missing"; exit 1; }
+cd ~/projects/whisperbox || { echo "project missing"; exit 1; }
 [ -d venv ] || { echo "venv missing — run: make setup"; exit 1; }
 [ -f .env ] || { echo ".env missing — run: cp .env.example .env"; exit 1; }
 [ -f "$input_abs" ] || { echo "input file not found: $input_abs"; exit 1; }
@@ -404,7 +404,7 @@ Start the server in the background. **Do not use `make server`** — it invokes 
 
 ```bash
 nohup python scripts/model_server.py --host 0.0.0.0 --port 8000 \
-    > /tmp/local_video_transcriber-server.log 2>&1 &
+    > /tmp/whisperbox-server.log 2>&1 &
 server_pid=$!
 ```
 
@@ -540,7 +540,7 @@ Replace with:
 
 | Condition | Behavior |
 |---|---|
-| `~/projects/local_video_transcriber` missing | Stop, report. Don't try to clone. |
+| `~/projects/whisperbox` missing | Stop, report. Don't try to clone. |
 | `venv/` missing | Stop, surface `make setup`. |
 | `.env` missing | Stop, surface `cp .env.example .env`. |
 | Input file missing or unsupported extension | Stop, report which. |
@@ -665,7 +665,7 @@ In `~/projects/skills/README.md`, find the line:
 After it, add:
 
 ```markdown
-- **`transcribe-locally`** — Run video/audio transcriptions through `~/projects/local_video_transcriber`. Prefers the warm model server on :8000, auto-starts it if not. Diarization opt-in via explicit speaker wording.
+- **`transcribe-locally`** — Run video/audio transcriptions through `~/projects/whisperbox`. Prefers the warm model server on :8000, auto-starts it if not. Diarization opt-in via explicit speaker wording.
 ```
 
 (The existing README also lists `design-vocabulary` and `sweep-modules` as skills present in the directory — if they aren't already in the "Current skills" section, leave them be; this task is only about adding `transcribe-locally`. Don't restructure the README.)
@@ -691,7 +691,7 @@ git push
 
 ### Task 11: Commit the implementation plan and spec to the project repo
 
-The spec and plan live in `~/projects/local_video_transcriber/docs/superpowers/`. The spec was already committed during brainstorming; this task makes sure the plan is committed too if it wasn't already.
+The spec and plan live in `~/projects/whisperbox/docs/superpowers/`. The spec was already committed during brainstorming; this task makes sure the plan is committed too if it wasn't already.
 
 **Files:**
 - (no source changes; just confirm this plan file is committed)
@@ -699,7 +699,7 @@ The spec and plan live in `~/projects/local_video_transcriber/docs/superpowers/`
 - [ ] **Step 1: Check status in the project repo**
 
 ```bash
-cd ~/projects/local_video_transcriber
+cd ~/projects/whisperbox
 git status
 ```
 
@@ -737,7 +737,7 @@ Make sure no model server is running first:
 pgrep -f model_server.py && pkill -f model_server.py
 ```
 
-Then ask Claude in the new session: "Transcribe `~/projects/local_video_transcriber/test.wav`."
+Then ask Claude in the new session: "Transcribe `~/projects/whisperbox/test.wav`."
 
 Expected: Claude invokes the skill, runs preflight, sees no server, starts one in the background, polls /health, then runs the transcription. At the end, reports the path of the output file in `transcripts/`.
 
@@ -747,7 +747,7 @@ In the same session, ask Claude to transcribe a different file. The skill's pref
 
 - [ ] **Step 5: Try the diarization path**
 
-Ask: "Transcribe `~/projects/local_video_transcriber/test.wav` and label the speakers." The skill should turn on `--diarize`. (This may fail if `HF_TOKEN` is unset — that's a feature, not a bug; the skill should report it as a preflight error.)
+Ask: "Transcribe `~/projects/whisperbox/test.wav` and label the speakers." The skill should turn on `--diarize`. (This may fail if `HF_TOKEN` is unset — that's a feature, not a bug; the skill should report it as a preflight error.)
 
 - [ ] **Step 6: Try a "shouldn't trigger diarization" phrasing**
 

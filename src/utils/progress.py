@@ -1,5 +1,5 @@
 """
-Progress reporting utilities for the Video Transcriber.
+Progress reporting utilities for the Whisperbox.
 
 This module provides classes for reporting progress during long-running operations,
 including progress bars, estimated time remaining, and resource usage reporting.

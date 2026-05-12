@@ -1,6 +1,6 @@
 # Docker Deployment Guide
 
-This guide explains how to deploy the Video Transcriber application using Docker for better scalability and isolation.
+This guide explains how to deploy the Whisperbox application using Docker for better scalability and isolation.
 
 ## Prerequisites
 
@@ -14,7 +14,7 @@ This guide explains how to deploy the Video Transcriber application using Docker
 
 ```bash
 git clone <repository-url>
-cd video_transcriber
+cd whisperbox
 ```
 
 2. Create an `.env` file from the example:

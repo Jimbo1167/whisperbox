@@ -1,5 +1,5 @@
 """
-Tests for the video transcriber functionality.
+Tests for the Whisperbox functionality.
 """
 
 import os

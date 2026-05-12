@@ -1,5 +1,5 @@
 """
-Pytest configuration and fixtures for testing the video transcriber.
+Pytest configuration and fixtures for testing the Whisperbox.
 """
 
 import os

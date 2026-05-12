@@ -1,6 +1,6 @@
 # API Reference
 
-This document provides detailed information about the Video Transcriber API, including classes, methods, and their parameters.
+This document provides detailed information about the Whisperbox API, including classes, methods, and their parameters.
 
 ## Table of Contents
 
@@ -15,7 +15,7 @@ This document provides detailed information about the Video Transcriber API, inc
 
 ## Transcriber
 
-The `Transcriber` class is the main entry point for the Video Transcriber. It orchestrates the transcription process by coordinating the audio processing, transcription, diarization, and output formatting components.
+The `Transcriber` class is the main entry point for the Whisperbox. It orchestrates the transcription process by coordinating the audio processing, transcription, diarization, and output formatting components.
 
 ### Class: `Transcriber`
 
@@ -498,7 +498,7 @@ Get a summary of all progress reporters.
 
 ## Configuration
 
-The `Config` class handles configuration settings for the Video Transcriber.
+The `Config` class handles configuration settings for the Whisperbox.
 
 ### Class: `Config`
 

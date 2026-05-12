@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Basic example of using the video transcriber.
+Basic example of using the Whisperbox.
 This example shows different ways to use the transcriber,
 including different output formats and speaker diarization options.
 """

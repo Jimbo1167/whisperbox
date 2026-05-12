@@ -1,4 +1,4 @@
-# Video Transcriber
+# Whisperbox
 
 A Python tool for transcribing videos and audio files with speaker diarization. This tool processes video or audio files, transcribes the speech to text, and identifies different speakers in the conversation.
 
@@ -34,7 +34,7 @@ A Python tool for transcribing videos and audio files with speaker diarization. 
 The project has been restructured into a modular architecture:
 
 ```
-video_transcriber/
+whisperbox/
 ├── src/
 │   ├── audio/         # Audio processing components
 │   ├── transcription/ # Transcription engine
@@ -129,8 +129,8 @@ WHISPER_MODEL=large-v3-turbo  # Common options: tiny, base, small, medium, large
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/yourusername/video_transcriber.git
-cd video_transcriber
+git clone https://github.com/yourusername/whisperbox.git
+cd whisperbox
 ```
 
 2. Set up the environment and install dependencies:
@@ -153,8 +153,8 @@ cp .env.example .env
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/yourusername/video_transcriber.git
-cd video_transcriber
+git clone https://github.com/yourusername/whisperbox.git
+cd whisperbox
 ```
 
 2. Build and run the Docker container:

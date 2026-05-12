@@ -17,8 +17,8 @@ logger = logging.getLogger(__name__)
 __version__ = "0.2.0"
 
 # Log package initialization
-logger.info(f"Video Transcriber v{__version__} initialized")
+logger.info(f"Whisperbox v{__version__} initialized")
 
 # Create cache directory if it doesn't exist
-cache_dir = os.path.join(os.path.expanduser("~"), ".cache", "video_transcriber")
+cache_dir = os.path.join(os.path.expanduser("~"), ".cache", "whisperbox")
 os.makedirs(cache_dir, exist_ok=True)

@@ -1,4 +1,4 @@
-# Detailed Implementation Plan for Video Transcriber Improvements
+# Detailed Implementation Plan for Whisperbox Improvements
 
 Based on the analysis of your codebase, here's a comprehensive plan to implement the suggested improvements. This plan breaks down the work into manageable phases with specific tasks, estimated effort, and expected outcomes.
 
@@ -9,7 +9,7 @@ Based on the analysis of your codebase, here's a comprehensive plan to implement
 #### Task 1.1: Create New Package Structure (1-2 days)
 - Create the directory structure as outlined:
   ```
-  video_transcriber/
+  whisperbox/
   ├── src/
   │   ├── __init__.py
   │   ├── audio/

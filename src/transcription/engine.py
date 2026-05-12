@@ -60,7 +60,7 @@ class WhisperEngine:
         self.whisper = None
         
         # Cache directory for models
-        self.cache_dir = os.path.join(os.path.expanduser("~"), ".cache", "video_transcriber")
+        self.cache_dir = os.path.join(os.path.expanduser("~"), ".cache", "whisperbox")
         os.makedirs(self.cache_dir, exist_ok=True)
         
         # Initialize cache manager if caching is enabled
@@ -330,7 +330,7 @@ class ParakeetEngine:
         self.test_mode = test_mode
         self.parakeet = None
 
-        self.cache_dir = os.path.join(os.path.expanduser("~"), ".cache", "video_transcriber")
+        self.cache_dir = os.path.join(os.path.expanduser("~"), ".cache", "whisperbox")
         os.makedirs(self.cache_dir, exist_ok=True)
         self.cache_manager = CacheManager(config) if config.cache_enabled else None
 

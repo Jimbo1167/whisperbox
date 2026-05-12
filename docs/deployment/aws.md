@@ -1,6 +1,6 @@
 # AWS Deployment Guide
 
-This guide explains how to deploy the Video Transcriber application to AWS for better scalability and performance.
+This guide explains how to deploy the Whisperbox application to AWS for better scalability and performance.
 
 ## Architecture Overview
 
@@ -26,7 +26,7 @@ The AWS deployment uses the following components:
 ### 1. Create an ECR Repository
 
 ```bash
-aws ecr create-repository --repository-name video-transcriber
+aws ecr create-repository --repository-name whisperbox
 ```
 
 Note the repository URI from the output.
@@ -38,19 +38,19 @@ Note the repository URI from the output.
 aws ecr get-login-password | docker login --username AWS --password-stdin <your-account-id>.dkr.ecr.<your-region>.amazonaws.com
 
 # Build the image
-docker build -t video-transcriber .
+docker build -t whisperbox .
 
 # Tag the image
-docker tag video-transcriber:latest <your-account-id>.dkr.ecr.<your-region>.amazonaws.com/video-transcriber:latest
+docker tag whisperbox:latest <your-account-id>.dkr.ecr.<your-region>.amazonaws.com/whisperbox:latest
 
 # Push the image
-docker push <your-account-id>.dkr.ecr.<your-region>.amazonaws.com/video-transcriber:latest
+docker push <your-account-id>.dkr.ecr.<your-region>.amazonaws.com/whisperbox:latest
 ```
 
 ### 3. Create an S3 Bucket
 
 ```bash
-aws s3 mb s3://video-transcriber-files
+aws s3 mb s3://whisperbox-files
 ```
 
 ### 4. Create ECS Cluster and Service
@@ -89,7 +89,7 @@ INCLUDE_DIARIZATION=false
 FORCE_CPU=true
 CACHE_ENABLED=true
 HF_TOKEN=your_token_here
-AWS_S3_BUCKET=video-transcriber-files
+AWS_S3_BUCKET=whisperbox-files
 ```
 
 ## S3 Integration

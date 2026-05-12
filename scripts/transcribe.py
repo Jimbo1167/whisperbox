@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Enhanced CLI for Video Transcriber using Click.
+Enhanced CLI for Whisperbox using Click.
 
-This script provides a modern command-line interface for the Video Transcriber
+This script provides a modern command-line interface for the Whisperbox
 with features like command completion, color output, and better help messages.
 """
 
@@ -50,7 +50,7 @@ def print_version(ctx, param, value):
     """Print version information and exit."""
     if not value or ctx.resilient_parsing:
         return
-    click.echo("Video Transcriber v0.2.0")
+    click.echo("Whisperbox v0.2.0")
     ctx.exit()
 
 @click.group(context_settings=dict(help_option_names=['-h', '--help']))
@@ -59,7 +59,7 @@ def print_version(ctx, param, value):
 @click.option('--verbose', '-v', is_flag=True, help='Enable verbose logging.')
 @click.pass_context
 def cli(ctx, verbose):
-    """Video Transcriber - Convert audio and video to text with speaker diarization.
+    """Whisperbox - Convert audio and video to text with speaker diarization.
     
     This tool provides various commands for transcribing audio and video files,
     with options for streaming, batch processing, and using a model server.

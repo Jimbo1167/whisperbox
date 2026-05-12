@@ -1,6 +1,6 @@
-# Video Transcriber Documentation
+# Whisperbox Documentation
 
-Welcome to the Video Transcriber documentation. This documentation provides comprehensive information about the Video Transcriber tool, including installation, configuration, usage, and API reference.
+Welcome to the Whisperbox documentation. This documentation provides comprehensive information about the Whisperbox tool, including installation, configuration, usage, and API reference.
 
 ## Table of Contents
 
@@ -31,8 +31,8 @@ Welcome to the Video Transcriber documentation. This documentation provides comp
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/video_transcriber.git
-cd video_transcriber
+git clone https://github.com/yourusername/whisperbox.git
+cd whisperbox
 
 # Set up the environment
 make setup
