@@ -60,3 +60,7 @@ models/
 # Output files
 transcripts/
 
+# Benchmark scratch dir (downloaded audio/subs); per-video reports under
+# benchmarks/<video_id>/<timestamp>.json are committed as artifacts.
+benchmarks/_tmp/
+

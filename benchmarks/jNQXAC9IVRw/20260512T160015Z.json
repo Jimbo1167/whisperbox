@@ -1,0 +1,27 @@
+{
+  "url": "https://www.youtube.com/watch?v=jNQXAC9IVRw",
+  "video_id": "jNQXAC9IVRw",
+  "video_title": "Me at the zoo",
+  "video_duration_s": 19,
+  "engine": "parakeet",
+  "model": "default",
+  "ref_source": "yt-dlp manual captions (en)",
+  "transcribe_seconds": 5.57061505317688,
+  "real_time_factor": 0.2931902659566779,
+  "segments": 4,
+  "metrics": {
+    "wer": 0.3076923076923077,
+    "mer": 0.2727272727272727,
+    "wil": 0.3595997498436523,
+    "wip": 0.6404002501563477,
+    "hits": 32,
+    "substitutions": 4,
+    "insertions": 5,
+    "deletions": 3,
+    "reference_word_count": 39,
+    "hypothesis_word_count": 41
+  },
+  "reference_preview": "All right, so here we are, in front of the elephants the cool thing about these guys is that they have really... really really long trunks and that's cool (baaaaaaaaaaahhh!!) and that's pretty much all there is to say",
+  "hypothesis_preview": "Alright, so here we are, one of the uh elephants. Um cool thing about these guys is b is that they have really, really, really long um fronts. And that's that's cool. And that's pretty much all there is to say.",
+  "timestamp": "20260512T160015Z"
+}
