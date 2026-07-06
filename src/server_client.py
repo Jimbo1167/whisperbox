@@ -38,6 +38,37 @@ def _server_is_healthy(server_url: str) -> bool:
         return False
 
 
+def _server_matches_config(server_url: str, config: Config) -> bool:
+    """Check the server was loaded with the model/language this run expects.
+
+    A long-running server keeps the config it started with; silently
+    transcribing with a different model or language than the caller's
+    config would change output quality with no warning.
+    """
+    try:
+        with urllib.request.urlopen(
+            f"{server_url}/status", timeout=HEALTH_PROBE_TIMEOUT
+        ) as response:
+            status = json.loads(response.read().decode("utf-8"))
+    except (urllib.error.URLError, OSError, ValueError):
+        return False
+
+    model = status.get("model") or {}
+    if model.get("model_size") != config.whisper_model_size:
+        logger.info(
+            "Model server runs %s but this request wants %s; transcribing locally",
+            model.get("model_size"), config.whisper_model_size,
+        )
+        return False
+    if model.get("language") != config.language:
+        logger.info(
+            "Model server language %s differs from requested %s; transcribing locally",
+            model.get("language"), config.language,
+        )
+        return False
+    return True
+
+
 def try_server_transcribe(
     input_path: str,
     config: Config,
@@ -64,8 +95,16 @@ def try_server_transcribe(
     if not _server_is_healthy(server_url):
         return None
 
+    if not _server_matches_config(server_url, config):
+        return None
+
     logger.info(f"Using warm model server at {server_url}")
-    payload = json.dumps({"audio_path": os.path.abspath(input_path)}).encode()
+    payload = json.dumps({
+        "audio_path": os.path.abspath(input_path),
+        # Explicit, so a server whose own default has diarization on doesn't
+        # apply it to this request.
+        "include_diarization": config.include_diarization,
+    }).encode()
     request = urllib.request.Request(
         f"{server_url}/transcribe",
         data=payload,
@@ -73,8 +112,11 @@ def try_server_transcribe(
         method="POST",
     )
     try:
-        # No read timeout: transcription of long files legitimately takes minutes.
-        with urllib.request.urlopen(request) as response:
+        # Long files legitimately take minutes; cap at the same ceiling the
+        # local path enforces so a wedged server can't hang the CLI forever.
+        with urllib.request.urlopen(
+            request, timeout=config.transcribe_timeout
+        ) as response:
             body = json.loads(response.read().decode("utf-8"))
     except (urllib.error.URLError, OSError, ValueError) as exc:
         logger.warning(f"Model server request failed, falling back locally: {exc}")
@@ -88,9 +130,29 @@ def try_server_transcribe(
     # JSON turns (start, end, text, speaker) tuples into lists; restore them.
     segments = [tuple(segment) for segment in raw_segments]
 
-    formatter = OutputFormatter(config)
-    formatter.format = config.output_format
-    os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
-    formatter.save_transcript(segments, output_path)
+    OutputFormatter(config).save_transcript(segments, output_path)
 
     return {"segments": segments, "output_file": output_path}
+
+
+def transcribe_with_server_fallback(
+    input_path: str,
+    config: Config,
+    output_path: str,
+) -> Dict[str, Any]:
+    """Transcribe via a running warm server when possible, else in-process.
+
+    Single entry-point helper so every CLI gets identical routing policy
+    (probe, compatibility check, fallback) instead of re-implementing it.
+    """
+    result = try_server_transcribe(input_path, config, output_path)
+    if result is not None:
+        return result
+
+    # Imported here, not at module top: TranscriptionService pulls in the
+    # model stack, and the server-served path never needs it.
+    from .service import TranscriptionService
+
+    logger.info("No compatible model server; transcribing in-process")
+    service = TranscriptionService(config)
+    return service.transcribe_file(input_path, output_path=output_path)

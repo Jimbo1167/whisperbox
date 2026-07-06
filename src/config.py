@@ -43,6 +43,10 @@ class Config:
             else "whisper"
         )
         self.transcription_engine = os.getenv("TRANSCRIPTION_ENGINE", default_engine).strip().lower()
+        # Whether the engine came from the platform default rather than an
+        # explicit request; a defaulted parakeet may fall back to whisper if
+        # parakeet-mlx isn't installed (older venvs), an explicit one may not.
+        self.transcription_engine_defaulted = os.getenv("TRANSCRIPTION_ENGINE") is None
         self.parakeet_model = os.getenv("PARAKEET_MODEL", "mlx-community/parakeet-tdt-0.6b-v3")
 
         # Parse output format
@@ -101,6 +105,7 @@ class Config:
             self.force_cpu = bool(overrides['force_cpu'])
         if 'transcription_engine' in overrides:
             self.transcription_engine = str(overrides['transcription_engine']).strip().lower()
+            self.transcription_engine_defaulted = False
         if 'parakeet_model' in overrides:
             self.parakeet_model = overrides['parakeet_model']
 

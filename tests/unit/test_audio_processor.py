@@ -95,18 +95,6 @@ def _wav_params(path):
         return wav_file.getframerate(), wav_file.getnchannels()
 
 
-def test_is_audio_file(audio_processor):
-    assert audio_processor.is_audio_file("test.wav") is True
-    assert audio_processor.is_audio_file("test.mp3") is True
-    assert audio_processor.is_audio_file("test.m4a") is True
-    assert audio_processor.is_audio_file("test.aac") is True
-    assert audio_processor.is_audio_file("test.flac") is True
-    assert audio_processor.is_audio_file("test.ogg") is True
-    assert audio_processor.is_audio_file("test.mp4") is False
-    assert audio_processor.is_audio_file("test.mov") is False
-    assert audio_processor.is_audio_file("test.txt") is False
-
-
 def test_wav_passthrough(audio_processor, tmp_path):
     wav_path = str(tmp_path / "input.wav")
     samples = np.zeros(1600, dtype=np.int16)
@@ -258,3 +246,17 @@ class TestRunWithTimeout:
 
         with pytest.raises(ValueError):
             run_with_timeout(boom, 5, "nope")
+
+    def test_worker_thread_is_daemon_so_timeout_cannot_hang_exit(self):
+        """A timed-out worker must not block interpreter shutdown: the
+        concurrent.futures atexit hook joins non-daemon workers forever."""
+        import threading
+        from src.audio.processor import run_with_timeout
+
+        seen = {}
+
+        def capture():
+            seen["daemon"] = threading.current_thread().daemon
+
+        run_with_timeout(capture, 5, "nope")
+        assert seen["daemon"] is True

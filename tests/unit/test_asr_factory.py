@@ -59,3 +59,28 @@ def test_protocol_runtime_checkable():
     cfg.transcription_engine = "whisper"
     engine = WhisperEngine(cfg, test_mode=True)
     assert isinstance(engine, ASREngine)
+
+
+def test_defaulted_parakeet_falls_back_to_whisper_when_mlx_missing(monkeypatch):
+    """A pre-existing venv without parakeet-mlx must not break when the
+    platform default flips to parakeet — only an EXPLICIT parakeet request
+    should fail loudly."""
+    monkeypatch.delenv("TRANSCRIPTION_ENGINE", raising=False)
+    monkeypatch.setattr(sys, "platform", "darwin")
+    monkeypatch.setattr(platform, "machine", lambda: "arm64")
+    # Make `import parakeet_mlx` raise ImportError
+    monkeypatch.setitem(sys.modules, "parakeet_mlx", None)
+
+    cfg = Config()
+    engine = make_asr_engine(cfg, test_mode=True)
+    assert isinstance(engine, WhisperEngine)
+
+
+def test_explicit_parakeet_does_not_fall_back(monkeypatch):
+    monkeypatch.setattr(sys, "platform", "darwin")
+    monkeypatch.setattr(platform, "machine", lambda: "arm64")
+    monkeypatch.setitem(sys.modules, "parakeet_mlx", None)
+
+    cfg = Config(transcription_engine="parakeet")
+    engine = make_asr_engine(cfg, test_mode=True)
+    assert isinstance(engine, ParakeetEngine)

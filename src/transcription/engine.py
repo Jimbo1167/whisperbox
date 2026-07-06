@@ -517,5 +517,20 @@ def make_asr_engine(config: Config, test_mode: bool = False) -> ASREngine:
     if engine_name == "whisper":
         return WhisperEngine(config, test_mode=test_mode)
     if engine_name == "parakeet":
+        # Parakeet is the *platform default* on Apple Silicon; environments
+        # created before that change may not have parakeet-mlx installed.
+        # A defaulted selection degrades gracefully; an explicit request
+        # fails loudly at model load.
+        if getattr(config, "transcription_engine_defaulted", False):
+            try:
+                import parakeet_mlx  # noqa: F401
+            except ImportError:
+                logger.warning(
+                    "parakeet-mlx is not installed; falling back to Whisper. "
+                    "Run `pip install -r requirements.txt` to get the ~10x "
+                    "faster Parakeet engine, or set TRANSCRIPTION_ENGINE=whisper "
+                    "to silence this warning."
+                )
+                return WhisperEngine(config, test_mode=test_mode)
         return ParakeetEngine(config, test_mode=test_mode)
     raise ValueError(f"Unknown transcription engine: {engine_name!r}")

@@ -476,13 +476,18 @@ class ModelRequestHandler(BaseHTTPRequestHandler):
             self._send_error(f"Audio file not found: {input_path}", 404)
             return
 
+        # Optional per-request override; None keeps the server's default.
+        include_diarization = request_data.get("include_diarization")
+
         _update_stats(requests=1)
 
         try:
             start_time = time.time()
             logger.info(f"Processing audio file: {input_path}")
 
-            result = service.transcribe_existing_audio(input_path)
+            result = service.transcribe_existing_audio(
+                input_path, include_diarization=include_diarization
+            )
             processing_time = time.time() - start_time
             _update_stats(successful=1, total_processing_time=processing_time)
 

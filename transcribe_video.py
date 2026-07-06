@@ -1,7 +1,6 @@
 import sys
 from src.config import Config
-from src.server_client import try_server_transcribe
-from src.service import TranscriptionService
+from src.server_client import transcribe_with_server_fallback
 import time
 import argparse
 import os
@@ -36,11 +35,7 @@ def main():
 
     print(f"\nProcessing {args.input_path}...")
     # Prefer a running warm model server (skips per-run model loading)
-    result = try_server_transcribe(args.input_path, config, args.output)
-    if result is None:
-        print("\nInitializing transcriber...")
-        service = TranscriptionService(config)
-        service.transcribe_file(args.input_path, output_path=args.output)
+    transcribe_with_server_fallback(args.input_path, config, args.output)
     
     elapsed_time = time.time() - start_time
     print(f"\nDone! Transcript saved.")

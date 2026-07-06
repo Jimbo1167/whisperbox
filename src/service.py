@@ -85,9 +85,7 @@ class TranscriptionService:
         # Format once and write the same string (save_transcript would
         # re-format the full segment list a second time).
         preview_text = formatter.format_transcript(segments)
-        output_parent = Path(output_path).parent
-        if str(output_parent):
-            output_parent.mkdir(parents=True, exist_ok=True)
+        Path(output_path).parent.mkdir(parents=True, exist_ok=True)
         Path(output_path).write_text(preview_text, encoding="utf-8")
         if progress_callback:
             progress_callback("Completed", 1.0)
@@ -100,11 +98,17 @@ class TranscriptionService:
             "processing_time": time.time() - start_time,
         }
 
-    def transcribe_existing_audio(self, audio_path: str) -> Dict[str, Any]:
+    def transcribe_existing_audio(
+        self,
+        audio_path: str,
+        include_diarization: Optional[bool] = None,
+    ) -> Dict[str, Any]:
         start_time = time.time()
 
         with self._lock:
-            segments = self.transcriber.transcribe(audio_path)
+            segments = self.transcriber.transcribe(
+                audio_path, include_diarization=include_diarization
+            )
 
         return {
             "segments": segments,

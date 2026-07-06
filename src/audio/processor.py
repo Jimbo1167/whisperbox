@@ -7,7 +7,7 @@ import wave
 from typing import Tuple, Optional, Generator, Iterator
 import numpy as np
 import imageio_ffmpeg
-import concurrent.futures
+import threading
 
 from ..config import Config
 from ..cache.manager import CacheManager
@@ -17,6 +17,9 @@ logger = logging.getLogger(__name__)
 # Whisper and Parakeet both consume 16kHz mono; extracting at the target rate
 # keeps temp WAVs ~5x smaller than source-rate stereo and skips a resample.
 TARGET_SAMPLE_RATE = 16000
+
+# Resolve the bundled ffmpeg binary once per process, not per extraction.
+FFMPEG_EXE = imageio_ffmpeg.get_ffmpeg_exe()
 
 
 def _resample_audio(audio: np.ndarray, orig_sr: int, target_sr: int) -> np.ndarray:
@@ -39,21 +42,33 @@ def run_with_timeout(fn, seconds, message="Operation timed out"):
     """Run fn() and raise TimeoutException in the caller if it exceeds seconds.
 
     Replaces the old threading.Timer-based context manager, which raised in
-    the timer thread and therefore never actually interrupted anything. The
-    work runs in a helper thread; on timeout the caller is unblocked and the
-    abandoned thread is left to finish in the background (Python cannot kill
-    a thread stuck in a C extension).
+    the timer thread and therefore never actually interrupted anything.
+
+    The work runs in a daemon thread (a plain Thread, not an executor:
+    concurrent.futures registers an atexit hook that joins its workers, so an
+    abandoned executor thread would block interpreter shutdown forever). On
+    timeout the caller is unblocked while the abandoned thread runs to
+    completion in the background — Python cannot kill a thread stuck in a C
+    extension — so a timed-out model call may still hold the model busy;
+    callers sharing one model instance (the model server) should treat a
+    timeout as a signal to restart rather than immediately reuse the model.
     """
-    executor = concurrent.futures.ThreadPoolExecutor(
-        max_workers=1, thread_name_prefix="timeout-guard"
-    )
-    future = executor.submit(fn)
-    try:
-        return future.result(timeout=seconds)
-    except concurrent.futures.TimeoutError:
+    outcome = {}
+
+    def _target():
+        try:
+            outcome["result"] = fn()
+        except BaseException as exc:  # propagate to the caller thread
+            outcome["error"] = exc
+
+    worker = threading.Thread(target=_target, name="timeout-guard", daemon=True)
+    worker.start()
+    worker.join(timeout=seconds)
+    if worker.is_alive():
         raise TimeoutException(message)
-    finally:
-        executor.shutdown(wait=False)
+    if "error" in outcome:
+        raise outcome["error"]
+    return outcome["result"]
 
 class AudioProcessor:
     """Handles audio extraction and processing for transcription."""
@@ -71,17 +86,6 @@ class AudioProcessor:
         
         # Initialize cache manager if caching is enabled
         self.cache_manager = CacheManager(config) if config.cache_enabled else None
-    
-    def is_audio_file(self, file_path: str) -> bool:
-        """Check if the file is an audio file based on extension.
-        
-        Args:
-            file_path: Path to the file
-            
-        Returns:
-            True if the file is an audio file, False otherwise
-        """
-        return file_path.lower().endswith(('.wav', '.mp3', '.m4a', '.aac', '.flac', '.ogg'))
     
     def get_audio_path(self, input_path: str) -> tuple[str, bool]:
         """
@@ -172,7 +176,7 @@ class AudioProcessor:
         # treat as a valid hit).
         partial_path = f"{wav_path}.part{os.getpid()}.wav"
         cmd = [
-            imageio_ffmpeg.get_ffmpeg_exe(),
+            FFMPEG_EXE,
             "-y", "-nostdin",
             "-i", input_path,
             "-vn",

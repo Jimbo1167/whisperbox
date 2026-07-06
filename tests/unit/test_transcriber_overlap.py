@@ -57,7 +57,7 @@ def _build_transcriber(*, include_diarization: bool) -> Transcriber:
     transcriber.transcription_engine.transcribe = lambda _p: [  # type: ignore[attr-defined]
         {"start": 0.0, "end": 1.0, "text": "hello"}
     ]
-    transcriber.diarization_engine.diarize = lambda _p, _enabled=None: [  # type: ignore[attr-defined]
+    transcriber.diarization_engine.diarize = lambda _p, enabled=None: [  # type: ignore[attr-defined]
         {"start": 0.0, "end": 1.0, "speaker": "SPEAKER_00"}
     ]
     return transcriber

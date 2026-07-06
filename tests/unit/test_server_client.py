@@ -19,22 +19,30 @@ def _free_port():
 
 class FakeModelServer(BaseHTTPRequestHandler):
     segments = [[0.0, 1.5, "hello world", ""]]
+    status_model = {"model_size": "large-v3-turbo", "language": "en"}
+    last_post_payload = None
 
     def do_GET(self):
         if self.path == "/health":
             body = json.dumps({"status": "ok"}).encode()
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.end_headers()
-            self.wfile.write(body)
+        elif self.path in ("/status", "/api/status"):
+            body = json.dumps(
+                {"status": "running", "model": type(self).status_model}
+            ).encode()
         else:
             self.send_response(404)
             self.end_headers()
+            return
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.end_headers()
+        self.wfile.write(body)
 
     def do_POST(self):
         length = int(self.headers.get("Content-Length", 0))
         request = json.loads(self.rfile.read(length))
         assert "audio_path" in request
+        type(self).last_post_payload = request
         body = json.dumps(
             {"segments": self.segments, "processing_time": 0.1}
         ).encode()
@@ -48,7 +56,12 @@ class FakeModelServer(BaseHTTPRequestHandler):
 
 
 @pytest.fixture
-def fake_server():
+def fake_server(config):
+    FakeModelServer.status_model = {
+        "model_size": config.whisper_model_size,
+        "language": config.language,
+    }
+    FakeModelServer.last_post_payload = None
     port = _free_port()
     server = HTTPServer(("127.0.0.1", port), FakeModelServer)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -104,6 +117,33 @@ def test_skips_server_when_disabled_by_env(
     config, input_file, tmp_path, fake_server, monkeypatch
 ):
     monkeypatch.setenv("WHISPERBOX_NO_SERVER", "1")
+    result = try_server_transcribe(
+        input_file, config, str(tmp_path / "out.txt"), server_url=fake_server
+    )
+    assert result is None
+
+
+def test_sends_explicit_diarization_flag(config, input_file, tmp_path, fake_server):
+    """The server must not apply its own diarization default to this request."""
+    try_server_transcribe(
+        input_file, config, str(tmp_path / "out.txt"), server_url=fake_server
+    )
+    assert FakeModelServer.last_post_payload["include_diarization"] is False
+
+
+def test_skips_server_when_model_differs(config, input_file, tmp_path, fake_server):
+    """A stale server loaded with a different model must not serve the request."""
+    FakeModelServer.status_model = {"model_size": "tiny", "language": "en"}
+    result = try_server_transcribe(
+        input_file, config, str(tmp_path / "out.txt"), server_url=fake_server
+    )
+    assert result is None
+
+
+def test_skips_server_when_language_differs(config, input_file, tmp_path, fake_server):
+    FakeModelServer.status_model = {
+        "model_size": config.whisper_model_size, "language": "de",
+    }
     result = try_server_transcribe(
         input_file, config, str(tmp_path / "out.txt"), server_url=fake_server
     )

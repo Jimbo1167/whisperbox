@@ -166,7 +166,7 @@ class Transcriber:
                 if diarize:
                     load_futures.append(
                         load_pool.submit(
-                            self.diarization_engine.ensure_model_loaded, True
+                            self.diarization_engine.ensure_model_loaded, force=True
                         )
                     )
                 audio_path, needs_cleanup = self.audio_processor.get_audio_path(input_path)
@@ -188,7 +188,7 @@ class Transcriber:
                         self.transcription_engine.transcribe, audio_path
                     )
                     future_diarization = executor.submit(
-                        self.diarization_engine.diarize, audio_path, True
+                        self.diarization_engine.diarize, audio_path, enabled=True
                     )
                     
                     # Get transcription results
@@ -368,26 +368,23 @@ class Transcriber:
             # Stream audio from the file
             audio_stream = self.audio_processor.stream_audio_from_file(audio_path)
             
-            # Each segment is yielded exactly once: raw when no diarization
-            # ran, speaker-labeled otherwise. Labels only exist once all
-            # segments are known, so the diarized variant buffers instead of
-            # double-yielding (which used to produce doubled transcripts).
-            if diarization_segments:
-                all_segments = list(
-                    self.transcription_engine.transcribe_stream(audio_stream)
-                )
-                logger.info("Combining transcription segments with speaker information")
-                combined_segments = self._combine_segments_with_speakers(all_segments, diarization_segments)
-
-                for segment in combined_segments:
+            # Each segment is yielded exactly once (the old code yielded raw
+            # segments and then re-yielded them speaker-labeled, doubling
+            # transcripts). Diarization already ran over the whole file above,
+            # so each streamed segment can be labeled and yielded immediately,
+            # keeping consumers' live progress and partial-save behavior.
+            for segment in self.transcription_engine.transcribe_stream(audio_stream):
+                if diarization_segments:
+                    labeled = self._combine_segments_with_speakers(
+                        [segment], diarization_segments
+                    )[0]
                     yield {
-                        "start": segment[0],
-                        "end": segment[1],
-                        "text": segment[2],
-                        "speaker": segment[3]
+                        "start": labeled[0],
+                        "end": labeled[1],
+                        "text": labeled[2],
+                        "speaker": labeled[3],
                     }
-            else:
-                for segment in self.transcription_engine.transcribe_stream(audio_stream):
+                else:
                     yield segment
             
             # Clean up temporary files if needed

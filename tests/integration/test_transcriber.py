@@ -85,7 +85,7 @@ def test_transcribe_with_diarization(transcriber, mock_audio_processor,
     mock_transcription_engine.transcribe.assert_called_once_with("test.wav")
     
     # Check that the diarization engine was called
-    mock_diarization_engine.diarize.assert_called_once_with("test.wav", True)
+    mock_diarization_engine.diarize.assert_called_once_with("test.wav", enabled=True)
     
     # Check the result
     assert len(result) == 2
@@ -328,3 +328,41 @@ class TestPerRequestDiarization:
 
         mock_diarization_engine.diarize.assert_not_called()
         assert [seg[3] for seg in result] == ["", ""]
+
+    def test_diarized_streaming_yields_incrementally(
+        self, mock_config, mock_audio_processor,
+        mock_transcription_engine, mock_diarization_engine, mock_output_formatter,
+    ):
+        """Diarization completes before streaming starts, so each streamed
+        segment can be labeled and yielded immediately — consumers keep their
+        live progress and Ctrl+C partial-save behavior."""
+        mock_config.transcription_engine = "whisper"
+        t = Transcriber.__new__(Transcriber)
+        t.config = mock_config
+        t.audio_processor = mock_audio_processor
+        t.transcription_engine = mock_transcription_engine
+        t.diarization_engine = mock_diarization_engine
+        t.output_formatter = mock_output_formatter
+        t.include_diarization = True
+        t.test_mode = False
+
+        produced = []
+
+        def segment_stream():
+            for seg in [
+                {"start": 0.0, "end": 2.0, "text": "Test segment one"},
+                {"start": 2.0, "end": 4.0, "text": "Test segment two"},
+            ]:
+                produced.append(seg)
+                yield seg
+
+        mock_audio_processor.stream_audio_from_file.return_value = iter([])
+        mock_transcription_engine.transcribe_stream.return_value = segment_stream()
+
+        gen = t.transcribe_stream_with_diarization("input.mp4")
+        first = next(gen)
+        # Only one source segment consumed when the first labeled one arrives
+        assert len(produced) == 1
+        assert first["speaker"] == "SPEAKER_01"
+        rest = list(gen)
+        assert [s["speaker"] for s in rest] == ["SPEAKER_02"]
