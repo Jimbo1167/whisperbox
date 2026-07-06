@@ -64,6 +64,7 @@ class TranscriptionService:
         output_path: Optional[str] = None,
         output_format: Optional[str] = None,
         progress_callback: Optional[Callable[[str, float], None]] = None,
+        include_diarization: Optional[bool] = None,
     ) -> Dict[str, Any]:
         start_time = time.time()
 
@@ -71,6 +72,7 @@ class TranscriptionService:
             segments = self.transcriber.transcribe(
                 input_path,
                 progress_callback=progress_callback,
+                include_diarization=include_diarization,
             )
 
         output_format = output_format or self.config.output_format
@@ -80,8 +82,13 @@ class TranscriptionService:
         formatter.format = output_format
         if progress_callback:
             progress_callback("Saving transcript", 0.96)
+        # Format once and write the same string (save_transcript would
+        # re-format the full segment list a second time).
         preview_text = formatter.format_transcript(segments)
-        formatter.save_transcript(segments, output_path)
+        output_parent = Path(output_path).parent
+        if str(output_parent):
+            output_parent.mkdir(parents=True, exist_ok=True)
+        Path(output_path).write_text(preview_text, encoding="utf-8")
         if progress_callback:
             progress_callback("Completed", 1.0)
 

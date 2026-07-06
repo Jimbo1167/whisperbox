@@ -12,7 +12,7 @@ import torch
 import numpy as np
 
 from ..config import Config
-from ..audio.processor import timeout, TimeoutException
+from ..audio.processor import run_with_timeout, TimeoutException
 from ..cache.manager import CacheManager
 from .streaming import StreamingTranscriber, AsyncStreamingTranscriber
 
@@ -181,53 +181,58 @@ class WhisperEngine:
         logger.info(f"Starting transcription for {audio_path}")
         start_time = time.time()
         
-        try:
-            with timeout(self.timeout_seconds, "Transcription timed out"):
-                transcribe_kwargs = dict(
-                    language=self.language,
-                    beam_size=self.config.whisper_beam_size,
-                    vad_filter=True,
-                    vad_parameters=dict(min_silence_duration_ms=500),
+        def _do_transcribe():
+            transcribe_kwargs = dict(
+                language=self.language,
+                beam_size=self.config.whisper_beam_size,
+                vad_filter=True,
+                vad_parameters=dict(min_silence_duration_ms=500),
+            )
+            if self.config.whisper_batch_size > 0:
+                # BatchedInferencePipeline decodes chunks in parallel —
+                # the single biggest faster-whisper throughput knob.
+                from faster_whisper import BatchedInferencePipeline
+                if self._batched_pipeline is None:
+                    self._batched_pipeline = BatchedInferencePipeline(
+                        model=self.whisper
+                    )
+                segments, _ = self._batched_pipeline.transcribe(
+                    audio_path,
+                    batch_size=self.config.whisper_batch_size,
+                    **transcribe_kwargs,
                 )
-                if self.config.whisper_batch_size > 0:
-                    # BatchedInferencePipeline decodes chunks in parallel —
-                    # the single biggest faster-whisper throughput knob.
-                    from faster_whisper import BatchedInferencePipeline
-                    if self._batched_pipeline is None:
-                        self._batched_pipeline = BatchedInferencePipeline(
-                            model=self.whisper
-                        )
-                    segments, _ = self._batched_pipeline.transcribe(
-                        audio_path,
-                        batch_size=self.config.whisper_batch_size,
-                        **transcribe_kwargs,
-                    )
-                else:
-                    segments, _ = self.whisper.transcribe(
-                        audio_path, **transcribe_kwargs
-                    )
-                
-                # Convert segments to a list of dictionaries for easier processing
-                result = []
-                for segment in segments:
-                    result.append({
-                        "start": segment.start,
-                        "end": segment.end,
-                        "text": segment.text.strip(),
-                        "words": [{"start": word.start, "end": word.end, "word": word.word} for word in segment.words] if segment.words else []
-                    })
-                
-                elapsed = time.time() - start_time
-                logger.info(f"Transcription completed in {elapsed:.1f} seconds, found {len(result)} segments")
-                
-                # Cache the results if caching is enabled
-                if self.cache_manager:
-                    self.cache_manager.cache_transcription(
-                        audio_path, result, engine_id=cache_engine_id
-                    )
-                
-                return result
-                
+            else:
+                segments, _ = self.whisper.transcribe(
+                    audio_path, **transcribe_kwargs
+                )
+
+            # Convert segments to a list of dictionaries for easier processing
+            result = []
+            for segment in segments:
+                result.append({
+                    "start": segment.start,
+                    "end": segment.end,
+                    "text": segment.text.strip(),
+                    "words": [{"start": word.start, "end": word.end, "word": word.word} for word in segment.words] if segment.words else []
+                })
+            return result
+
+        try:
+            result = run_with_timeout(
+                _do_transcribe, self.timeout_seconds, "Transcription timed out"
+            )
+
+            elapsed = time.time() - start_time
+            logger.info(f"Transcription completed in {elapsed:.1f} seconds, found {len(result)} segments")
+
+            # Cache the results if caching is enabled
+            if self.cache_manager:
+                self.cache_manager.cache_transcription(
+                    audio_path, result, engine_id=cache_engine_id
+                )
+
+            return result
+
         except TimeoutException as e:
             logger.error(f"Transcription timed out after {self.timeout_seconds} seconds")
             raise
@@ -430,27 +435,30 @@ class ParakeetEngine:
         logger.info(f"Starting parakeet transcription for {audio_path}")
         start_time = time.time()
 
+        def _do_transcribe():
+            result = self.parakeet.transcribe(
+                audio_path,
+                chunk_duration=self.CHUNK_DURATION,
+                overlap_duration=self.OVERLAP_DURATION,
+            )
+            return self._map_aligned_result(result)
+
         try:
-            with timeout(self.timeout_seconds, "Transcription timed out"):
-                result = self.parakeet.transcribe(
-                    audio_path,
-                    chunk_duration=self.CHUNK_DURATION,
-                    overlap_duration=self.OVERLAP_DURATION,
+            segments = run_with_timeout(
+                _do_transcribe, self.timeout_seconds, "Transcription timed out"
+            )
+
+            elapsed = time.time() - start_time
+            logger.info(
+                f"Parakeet transcription completed in {elapsed:.1f}s, "
+                f"{len(segments)} segments"
+            )
+
+            if self.cache_manager:
+                self.cache_manager.cache_transcription(
+                    audio_path, segments, engine_id=cache_engine_id
                 )
-
-                segments = self._map_aligned_result(result)
-
-                elapsed = time.time() - start_time
-                logger.info(
-                    f"Parakeet transcription completed in {elapsed:.1f}s, "
-                    f"{len(segments)} segments"
-                )
-
-                if self.cache_manager:
-                    self.cache_manager.cache_transcription(
-                        audio_path, segments, engine_id=cache_engine_id
-                    )
-                return segments
+            return segments
 
         except TimeoutException:
             logger.error(f"Parakeet transcription timed out after {self.timeout_seconds}s")

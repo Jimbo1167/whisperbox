@@ -125,19 +125,29 @@ class Transcriber:
         self,
         input_path: str,
         progress_callback: Optional[Callable[[str, float], None]] = None,
+        include_diarization: Optional[bool] = None,
     ) -> list[tuple[float, float, str, str]]:
         """
         Transcribe an audio or video file.
-        
+
         Args:
             input_path: Path to the audio or video file
-            
+            include_diarization: Per-call override of the configured
+                diarization setting. None means "use the configured default".
+                Lets concurrent callers (e.g. the model server) vary
+                diarization per request without mutating shared config.
+
         Returns:
             List of tuples containing (start_time, end_time, text, speaker)
-            
+
         Raises:
             Exception: If transcription fails
         """
+        diarize = (
+            self.include_diarization
+            if include_diarization is None
+            else include_diarization
+        )
         audio_path = None
         needs_cleanup = False
 
@@ -153,9 +163,11 @@ class Transcriber:
                 max_workers=2, thread_name_prefix="model-preload"
             ) as load_pool:
                 load_futures = [load_pool.submit(self.transcription_engine.ensure_model_loaded)]
-                if self.include_diarization:
+                if diarize:
                     load_futures.append(
-                        load_pool.submit(self.diarization_engine.ensure_model_loaded)
+                        load_pool.submit(
+                            self.diarization_engine.ensure_model_loaded, True
+                        )
                     )
                 audio_path, needs_cleanup = self.audio_processor.get_audio_path(input_path)
                 # Executor __exit__ joins all submitted tasks before returning.
@@ -165,7 +177,7 @@ class Transcriber:
             for future in load_futures:
                 future.result()
 
-            if self.include_diarization:
+            if diarize:
                 logger.info("\nStarting transcription and diarization...")
                 if progress_callback:
                     progress_callback("Transcribing and diarizing", 0.2)
@@ -176,7 +188,7 @@ class Transcriber:
                         self.transcription_engine.transcribe, audio_path
                     )
                     future_diarization = executor.submit(
-                        self.diarization_engine.diarize, audio_path
+                        self.diarization_engine.diarize, audio_path, True
                     )
                     
                     # Get transcription results
@@ -356,23 +368,17 @@ class Transcriber:
             # Stream audio from the file
             audio_stream = self.audio_processor.stream_audio_from_file(audio_path)
             
-            # Keep track of all segments to combine with speakers later
-            all_segments = []
-            
-            # Transcribe the audio stream
-            for segment in self.transcription_engine.transcribe_stream(audio_stream):
-                all_segments.append(segment)
-                
-                # For streaming output, we'll yield the segment without speaker info first
-                # and update it later when all segments are available
-                yield segment
-            
-            # If diarization was performed, combine with transcription
+            # Each segment is yielded exactly once: raw when no diarization
+            # ran, speaker-labeled otherwise. Labels only exist once all
+            # segments are known, so the diarized variant buffers instead of
+            # double-yielding (which used to produce doubled transcripts).
             if diarization_segments:
+                all_segments = list(
+                    self.transcription_engine.transcribe_stream(audio_stream)
+                )
                 logger.info("Combining transcription segments with speaker information")
                 combined_segments = self._combine_segments_with_speakers(all_segments, diarization_segments)
-                
-                # Yield the updated segments with speaker information
+
                 for segment in combined_segments:
                     yield {
                         "start": segment[0],
@@ -380,6 +386,9 @@ class Transcriber:
                         "text": segment[2],
                         "speaker": segment[3]
                     }
+            else:
+                for segment in self.transcription_engine.transcribe_stream(audio_stream):
+                    yield segment
             
             # Clean up temporary files if needed
             if needs_cleanup and os.path.exists(audio_path):

@@ -75,6 +75,9 @@ def test_config():
             self.max_cache_size = 10 * 1024 * 1024 * 1024  # 10GB
             self.transcription_engine = "whisper"
             self.parakeet_model = "mlx-community/parakeet-tdt-0.6b-v3"
+            self.whisper_beam_size = 5
+            self.whisper_cpu_threads = 0
+            self.whisper_batch_size = 0
     return TestConfig()
 
 @pytest.fixture

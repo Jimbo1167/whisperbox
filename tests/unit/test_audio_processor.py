@@ -234,3 +234,27 @@ def test_process_audio_stream(audio_processor):
 
     expected_chunks = (len(audio_data) + chunk_samples - 1) // chunk_samples
     assert len(chunks) == expected_chunks
+
+
+class TestRunWithTimeout:
+    def test_returns_result_when_fast_enough(self):
+        from src.audio.processor import run_with_timeout
+        assert run_with_timeout(lambda: 42, 5, "nope") == 42
+
+    def test_raises_timeout_exception_in_caller(self):
+        """The old thread-Timer 'timeout' raised in the wrong thread and never
+        actually interrupted the caller — this pins the fixed behavior."""
+        import time as _time
+        from src.audio.processor import run_with_timeout
+
+        with pytest.raises(TimeoutException):
+            run_with_timeout(lambda: _time.sleep(2), 0.05, "too slow")
+
+    def test_propagates_fn_exception(self):
+        from src.audio.processor import run_with_timeout
+
+        def boom():
+            raise ValueError("inner")
+
+        with pytest.raises(ValueError):
+            run_with_timeout(boom, 5, "nope")

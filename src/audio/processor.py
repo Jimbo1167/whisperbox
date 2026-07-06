@@ -7,8 +7,7 @@ import wave
 from typing import Tuple, Optional, Generator, Iterator
 import numpy as np
 import imageio_ffmpeg
-from contextlib import contextmanager
-import threading
+import concurrent.futures
 
 from ..config import Config
 from ..cache.manager import CacheManager
@@ -35,23 +34,26 @@ class TimeoutException(Exception):
     """Raised when an operation times out."""
     pass
 
-@contextmanager
-def timeout(seconds, message="Operation timed out"):
-    """Thread-based timeout context manager."""
-    timer = None
-    exception = TimeoutException(message)
-    
-    def timeout_handler():
-        nonlocal exception
-        raise exception
-    
+
+def run_with_timeout(fn, seconds, message="Operation timed out"):
+    """Run fn() and raise TimeoutException in the caller if it exceeds seconds.
+
+    Replaces the old threading.Timer-based context manager, which raised in
+    the timer thread and therefore never actually interrupted anything. The
+    work runs in a helper thread; on timeout the caller is unblocked and the
+    abandoned thread is left to finish in the background (Python cannot kill
+    a thread stuck in a C extension).
+    """
+    executor = concurrent.futures.ThreadPoolExecutor(
+        max_workers=1, thread_name_prefix="timeout-guard"
+    )
+    future = executor.submit(fn)
     try:
-        timer = threading.Timer(seconds, timeout_handler)
-        timer.start()
-        yield
+        return future.result(timeout=seconds)
+    except concurrent.futures.TimeoutError:
+        raise TimeoutException(message)
     finally:
-        if timer:
-            timer.cancel()
+        executor.shutdown(wait=False)
 
 class AudioProcessor:
     """Handles audio extraction and processing for transcription."""
