@@ -63,6 +63,16 @@ class Config:
         self.transcribe_timeout = int(os.getenv("TRANSCRIBE_TIMEOUT", "3600"))
         self.diarize_timeout = int(os.getenv("DIARIZE_TIMEOUT", "3600"))
 
+        # Whisper (faster-whisper/ctranslate2) tuning.
+        # WHISPER_BEAM_SIZE=1 (greedy) is ~2x faster than the default 5-way beam.
+        # WHISPER_CPU_THREADS=0 keeps ctranslate2's default (4); higher values
+        # use more of the machine on the CPU-bound path.
+        # WHISPER_BATCH_SIZE>0 enables BatchedInferencePipeline (parallel
+        # chunk decoding); 0 keeps the sequential decoder.
+        self.whisper_beam_size = int(os.getenv("WHISPER_BEAM_SIZE", "5"))
+        self.whisper_cpu_threads = int(os.getenv("WHISPER_CPU_THREADS", "0"))
+        self.whisper_batch_size = int(os.getenv("WHISPER_BATCH_SIZE", "0"))
+
         # Device settings
         self.force_cpu = os.getenv("FORCE_CPU", "false").strip().lower() in ["true", "1", "yes", "on"]
 
@@ -135,6 +145,9 @@ class Config:
             "max_cache_size": self.max_cache_size,
             "transcription_engine": self.transcription_engine,
             "parakeet_model": self.parakeet_model,
+            "whisper_beam_size": self.whisper_beam_size,
+            "whisper_cpu_threads": self.whisper_cpu_threads,
+            "whisper_batch_size": self.whisper_batch_size,
         }
     
     def validate(self) -> bool:

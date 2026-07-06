@@ -58,7 +58,8 @@ class WhisperEngine:
         self.whisper_model_size = config.whisper_model_size
         self.test_mode = test_mode
         self.whisper = None
-        
+        self._batched_pipeline = None
+
         # Cache directory for models
         self.cache_dir = os.path.join(os.path.expanduser("~"), ".cache", "whisperbox")
         os.makedirs(self.cache_dir, exist_ok=True)
@@ -130,8 +131,9 @@ class WhisperEngine:
                 
             self.whisper = WhisperModel(
                 self.whisper_model_size,
-                device="cpu" if self.device == "mps" else self.device,  
+                device="cpu" if self.device == "mps" else self.device,
                 compute_type=compute_type,
+                cpu_threads=self.config.whisper_cpu_threads,
                 download_root=os.path.join(self.cache_dir, "whisper")
             )
             logger.info(f"Whisper model loaded successfully: {self.whisper_model_size}")
@@ -181,12 +183,29 @@ class WhisperEngine:
         
         try:
             with timeout(self.timeout_seconds, "Transcription timed out"):
-                segments, _ = self.whisper.transcribe(
-                    audio_path,
+                transcribe_kwargs = dict(
                     language=self.language,
+                    beam_size=self.config.whisper_beam_size,
                     vad_filter=True,
-                    vad_parameters=dict(min_silence_duration_ms=500)
+                    vad_parameters=dict(min_silence_duration_ms=500),
                 )
+                if self.config.whisper_batch_size > 0:
+                    # BatchedInferencePipeline decodes chunks in parallel —
+                    # the single biggest faster-whisper throughput knob.
+                    from faster_whisper import BatchedInferencePipeline
+                    if self._batched_pipeline is None:
+                        self._batched_pipeline = BatchedInferencePipeline(
+                            model=self.whisper
+                        )
+                    segments, _ = self._batched_pipeline.transcribe(
+                        audio_path,
+                        batch_size=self.config.whisper_batch_size,
+                        **transcribe_kwargs,
+                    )
+                else:
+                    segments, _ = self.whisper.transcribe(
+                        audio_path, **transcribe_kwargs
+                    )
                 
                 # Convert segments to a list of dictionaries for easier processing
                 result = []
