@@ -1,5 +1,6 @@
 import sys
 from src.config import Config
+from src.server_client import try_server_transcribe
 from src.service import TranscriptionService
 import time
 import argparse
@@ -27,16 +28,19 @@ def main():
     print("\n=== Starting Transcription Process ===")
     start_time = time.time()
     
-    print("\nInitializing transcriber...")
     config = Config(".env")  # Explicitly load from .env file
-    service = TranscriptionService(config)
-    
+
     # Set default output path if not specified
     if args.output is None:
         args.output = get_default_output_path(args.input_path, config.output_format)
-    
+
     print(f"\nProcessing {args.input_path}...")
-    service.transcribe_file(args.input_path, output_path=args.output)
+    # Prefer a running warm model server (skips per-run model loading)
+    result = try_server_transcribe(args.input_path, config, args.output)
+    if result is None:
+        print("\nInitializing transcriber...")
+        service = TranscriptionService(config)
+        service.transcribe_file(args.input_path, output_path=args.output)
     
     elapsed_time = time.time() - start_time
     print(f"\nDone! Transcript saved.")
