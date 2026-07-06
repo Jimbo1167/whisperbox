@@ -165,6 +165,10 @@ class AudioProcessor:
         the extraction is one pass and the timeout is actually enforced.
         """
         logger.info(f"Extracting 16kHz mono audio: {input_path} -> {wav_path}")
+        # Write to a temp name and rename into place so a killed run can never
+        # leave a truncated WAV at the final path (which the cache would then
+        # treat as a valid hit).
+        partial_path = f"{wav_path}.part{os.getpid()}.wav"
         cmd = [
             imageio_ffmpeg.get_ffmpeg_exe(),
             "-y", "-nostdin",
@@ -173,7 +177,8 @@ class AudioProcessor:
             "-ac", "1",
             "-ar", str(TARGET_SAMPLE_RATE),
             "-acodec", "pcm_s16le",
-            wav_path,
+            "-f", "wav",
+            partial_path,
         ]
         start_time = time.time()
         try:
@@ -181,18 +186,19 @@ class AudioProcessor:
                 cmd, capture_output=True, timeout=self.timeout_seconds
             )
         except subprocess.TimeoutExpired:
-            if os.path.exists(wav_path):
-                os.remove(wav_path)
+            if os.path.exists(partial_path):
+                os.remove(partial_path)
             logger.error(f"Audio extraction timed out after {self.timeout_seconds}s")
             raise TimeoutException("Audio extraction timed out")
 
         if result.returncode != 0:
-            if os.path.exists(wav_path):
-                os.remove(wav_path)
+            if os.path.exists(partial_path):
+                os.remove(partial_path)
             stderr_tail = result.stderr.decode("utf-8", errors="replace")[-500:]
             logger.error(f"ffmpeg failed for {input_path}: {stderr_tail}")
             raise Exception(f"Error extracting audio: {stderr_tail}")
 
+        os.replace(partial_path, wav_path)
         elapsed = time.time() - start_time
         logger.info(f"Audio extraction complete in {elapsed:.1f} seconds")
     
