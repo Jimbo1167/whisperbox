@@ -1,5 +1,8 @@
 """ASREngine Protocol + make_asr_engine factory."""
 
+import platform
+import sys
+
 import pytest
 
 from src.config import Config
@@ -11,12 +14,24 @@ from src.transcription.engine import (
 )
 
 
-def test_factory_default_config_returns_whisper_engine(monkeypatch):
-    """Config default (no env override) routes to WhisperEngine."""
+def test_factory_default_config_returns_whisper_engine_off_apple_silicon(monkeypatch):
+    """Config default (no env override) routes to WhisperEngine off Apple Silicon."""
     monkeypatch.delenv("TRANSCRIPTION_ENGINE", raising=False)
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setattr(platform, "machine", lambda: "x86_64")
     cfg = Config()
     engine = make_asr_engine(cfg, test_mode=True)
     assert isinstance(engine, WhisperEngine)
+
+
+def test_factory_default_config_returns_parakeet_engine_on_apple_silicon(monkeypatch):
+    """Config default (no env override) routes to ParakeetEngine on Apple Silicon."""
+    monkeypatch.delenv("TRANSCRIPTION_ENGINE", raising=False)
+    monkeypatch.setattr(sys, "platform", "darwin")
+    monkeypatch.setattr(platform, "machine", lambda: "arm64")
+    cfg = Config()
+    engine = make_asr_engine(cfg, test_mode=True)
+    assert isinstance(engine, ParakeetEngine)
 
 
 def test_factory_returns_whisper_engine_for_explicit_whisper_config():

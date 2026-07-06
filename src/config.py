@@ -35,8 +35,14 @@ class Config:
         self.diarization_model = os.getenv("DIARIZATION_MODEL", "pyannote/speaker-diarization-community-1")
         self.language = os.getenv("LANGUAGE", "en")
 
-        # ASR engine selection
-        self.transcription_engine = os.getenv("TRANSCRIPTION_ENGINE", "whisper").strip().lower()
+        # ASR engine selection. Parakeet (MLX) is roughly an order of magnitude
+        # faster than Whisper-on-CPU, but only exists on Apple Silicon.
+        default_engine = (
+            "parakeet"
+            if sys.platform == "darwin" and platform.machine() == "arm64"
+            else "whisper"
+        )
+        self.transcription_engine = os.getenv("TRANSCRIPTION_ENGINE", default_engine).strip().lower()
         self.parakeet_model = os.getenv("PARAKEET_MODEL", "mlx-community/parakeet-tdt-0.6b-v3")
 
         # Parse output format

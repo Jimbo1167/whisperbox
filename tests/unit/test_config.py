@@ -127,8 +127,35 @@ class TestEngineSelection:
     def test_defaults(self, monkeypatch):
         _clear_engine_env(monkeypatch)
         cfg = Config()
-        assert cfg.transcription_engine == "whisper"
+        expected = (
+            "parakeet"
+            if sys.platform == "darwin" and platform.machine() == "arm64"
+            else "whisper"
+        )
+        assert cfg.transcription_engine == expected
         assert cfg.parakeet_model == "mlx-community/parakeet-tdt-0.6b-v3"
+
+    def test_default_engine_is_parakeet_on_apple_silicon(self, monkeypatch):
+        _clear_engine_env(monkeypatch)
+        monkeypatch.setattr(sys, "platform", "darwin")
+        monkeypatch.setattr(platform, "machine", lambda: "arm64")
+        cfg = Config()
+        assert cfg.transcription_engine == "parakeet"
+
+    def test_default_engine_is_whisper_off_apple_silicon(self, monkeypatch):
+        _clear_engine_env(monkeypatch)
+        monkeypatch.setattr(sys, "platform", "linux")
+        monkeypatch.setattr(platform, "machine", lambda: "x86_64")
+        cfg = Config()
+        assert cfg.transcription_engine == "whisper"
+
+    def test_env_overrides_platform_default(self, monkeypatch):
+        _clear_engine_env(monkeypatch)
+        monkeypatch.setattr(sys, "platform", "darwin")
+        monkeypatch.setattr(platform, "machine", lambda: "arm64")
+        monkeypatch.setenv("TRANSCRIPTION_ENGINE", "whisper")
+        cfg = Config()
+        assert cfg.transcription_engine == "whisper"
 
     def test_env_override(self, monkeypatch):
         monkeypatch.setenv("TRANSCRIPTION_ENGINE", "Parakeet")
@@ -147,7 +174,7 @@ class TestEngineSelection:
         _clear_engine_env(monkeypatch)
         cfg = Config()
         d = cfg.to_dict()
-        assert d["transcription_engine"] == "whisper"
+        assert d["transcription_engine"] == cfg.transcription_engine
         assert d["parakeet_model"] == "mlx-community/parakeet-tdt-0.6b-v3"
 
     def test_validate_rejects_unknown_engine(self, monkeypatch):
