@@ -12,6 +12,7 @@ import time
 import glob
 import argparse
 import logging
+import threading
 import concurrent.futures
 from typing import List, Dict, Any, Optional, Tuple
 from pathlib import Path
@@ -36,6 +37,32 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
+# Worker-local Transcriber cache: model loads are the dominant per-file cost,
+# so each worker (thread or process) loads its models once and reuses them for
+# every file it processes instead of paying a full load per file.
+_worker_state = threading.local()
+
+
+def _config_fingerprint(config: Config) -> Tuple:
+    return (
+        config.transcription_engine,
+        config.whisper_model_size,
+        config.parakeet_model,
+        config.diarization_model,
+        config.language,
+        config.include_diarization,
+        config.force_cpu,
+    )
+
+
+def _get_worker_transcriber(config: Config) -> Transcriber:
+    fingerprint = _config_fingerprint(config)
+    if getattr(_worker_state, "fingerprint", None) != fingerprint:
+        _worker_state.transcriber = Transcriber(config)
+        _worker_state.fingerprint = fingerprint
+    return _worker_state.transcriber
+
+
 def process_file(
     input_path: str, 
     config: Config, 
@@ -59,8 +86,8 @@ def process_file(
     start_time = time.time()
     
     try:
-        # Create transcriber
-        transcriber = Transcriber(config)
+        # Reuse this worker's transcriber (loads models only on first use)
+        transcriber = _get_worker_transcriber(config)
         
         # Generate output path
         input_file = Path(input_path)

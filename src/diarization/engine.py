@@ -9,7 +9,7 @@ import torch
 import warnings
 
 from ..config import Config
-from ..audio.processor import timeout, TimeoutException
+from ..audio.processor import run_with_timeout, TimeoutException
 from ..cache.manager import CacheManager
 
 logger = logging.getLogger(__name__)
@@ -61,12 +61,12 @@ class DiarizationEngine:
         if self.include_diarization and self.test_mode:
             self._load_model()
     
-    def _load_model(self):
+    def _load_model(self, force: bool = False):
         """Load the diarization model."""
         if self.diarizer is not None:
             return
 
-        if not self.include_diarization:
+        if not (self.include_diarization or force):
             logger.info("Diarization is disabled, skipping model loading")
             return
             
@@ -115,11 +115,16 @@ class DiarizationEngine:
             logger.error(f"Error loading diarization model: {e}")
             raise
 
-    def ensure_model_loaded(self):
-        """Load the diarization model on demand."""
-        if self.include_diarization and self.diarizer is None:
+    def ensure_model_loaded(self, force: bool = False):
+        """Load the diarization model on demand.
+
+        Args:
+            force: Load even when the configured default has diarization off
+                (used for per-request diarization overrides).
+        """
+        if (self.include_diarization or force) and self.diarizer is None:
             logger.info(f"Loading diarization model: {self.diarization_model}")
-            self._load_model()
+            self._load_model(force=force)
 
     def _unwrap_diarization_result(self, diarization_result: Any):
         """Normalize pyannote outputs across old and new API shapes."""
@@ -135,32 +140,37 @@ class DiarizationEngine:
             f"Unsupported diarization output type: {type(diarization_result).__name__}"
         )
     
-    def diarize(self, audio_path: str) -> Optional[List[Dict[str, Any]]]:
+    def diarize(
+        self, audio_path: str, enabled: Optional[bool] = None
+    ) -> Optional[List[Dict[str, Any]]]:
         """Perform speaker diarization with timeout.
-        
+
         Args:
             audio_path: Path to the audio file
-            
+            enabled: Per-call override of the configured diarization setting
+                (None = use the configured default)
+
         Returns:
             List of diarization segments or None if diarization is disabled
-            
+
         Raises:
             TimeoutException: If diarization times out
             Exception: If diarization fails
         """
-        if not self.include_diarization:
+        effective = self.include_diarization if enabled is None else enabled
+        if not effective:
             logger.info("Diarization is disabled, skipping")
             return None
-        
+
         # Check if we have cached results
         if self.cache_manager:
             cached_diarization = self.cache_manager.get_cached_diarization(audio_path)
             if cached_diarization:
                 return cached_diarization
-            
+
         if not self.diarizer:
             logger.warning("Diarizer not initialized, attempting to load model")
-            self.ensure_model_loaded()
+            self.ensure_model_loaded(force=effective)
             if not self.diarizer:
                 logger.error("Failed to load diarization model")
                 return None
@@ -168,32 +178,34 @@ class DiarizationEngine:
         logger.info(f"Starting speaker diarization for {audio_path}")
         start_time = time.time()
         
+        def _do_diarize():
+            diarization = self._unwrap_diarization_result(self.diarizer(audio_path))
+
+            segments = []
+            for turn, _, speaker in diarization.itertracks(yield_label=True):
+                segments.append({
+                    "start": turn.start,
+                    "end": turn.end,
+                    "speaker": speaker
+                })
+
+            segments.sort(key=lambda x: x["start"])
+            return segments
+
         try:
-            with timeout(self.timeout_seconds, "Diarization timed out"):
-                # Run diarization
-                diarization = self._unwrap_diarization_result(self.diarizer(audio_path))
-                
-                # Process the diarization results
-                segments = []
-                for turn, _, speaker in diarization.itertracks(yield_label=True):
-                    segments.append({
-                        "start": turn.start,
-                        "end": turn.end,
-                        "speaker": speaker
-                    })
-                
-                # Sort segments by start time
-                segments.sort(key=lambda x: x["start"])
-                
-                elapsed = time.time() - start_time
-                logger.info(f"Diarization completed in {elapsed:.1f} seconds, found {len(segments)} segments")
-                
-                # Cache the results if caching is enabled
-                if self.cache_manager:
-                    self.cache_manager.cache_diarization(audio_path, segments)
-                
-                return segments
-                
+            segments = run_with_timeout(
+                _do_diarize, self.timeout_seconds, "Diarization timed out"
+            )
+
+            elapsed = time.time() - start_time
+            logger.info(f"Diarization completed in {elapsed:.1f} seconds, found {len(segments)} segments")
+
+            # Cache the results if caching is enabled
+            if self.cache_manager:
+                self.cache_manager.cache_diarization(audio_path, segments)
+
+            return segments
+
         except TimeoutException:
             logger.error(f"Diarization timed out after {self.timeout_seconds} seconds")
             raise

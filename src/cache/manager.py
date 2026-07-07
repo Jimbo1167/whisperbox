@@ -239,6 +239,27 @@ class CacheManager:
         
         return None
     
+    def audio_cache_path(self, input_path: str) -> str:
+        """Get the destination path for an input's cached audio.
+
+        Extraction writes directly to this path (no copy step). The path is
+        stable for an unchanged input file, which keeps downstream
+        transcription/diarization cache keys stable across runs.
+
+        Args:
+            input_path: Path to the input file (audio or video)
+
+        Returns:
+            Path inside the audio cache where the extracted WAV belongs
+
+        Raises:
+            FileNotFoundError: If the input file doesn't exist
+        """
+        cache_key = self._generate_cache_key(input_path, prefix="audio")
+        if cache_key is None:
+            raise FileNotFoundError(f"Input file not found: {input_path}")
+        return self._get_cache_path(cache_key, "audio")
+
     def cache_audio(self, input_path: str, audio_path: str) -> str:
         """
         Cache an audio file.

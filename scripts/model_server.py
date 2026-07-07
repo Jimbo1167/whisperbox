@@ -141,21 +141,14 @@ def _run_transcription_job(
         logger.info("Processing uploaded file for job %s: %s", job_id, temp_path)
         progress_callback("Starting", 0.05)
 
-        original_diarization = service.config.include_diarization
-        service.config.include_diarization = include_diarization
-        service.transcriber.include_diarization = include_diarization
-        service.transcriber.diarization_engine.include_diarization = include_diarization
-
-        try:
-            result = service.transcribe_file(
-                temp_path,
-                output_format=output_format,
-                progress_callback=progress_callback,
-            )
-        finally:
-            service.config.include_diarization = original_diarization
-            service.transcriber.include_diarization = original_diarization
-            service.transcriber.diarization_engine.include_diarization = original_diarization
+        # Diarization is passed per-request; mutating the shared config here
+        # raced with concurrently submitted jobs.
+        result = service.transcribe_file(
+            temp_path,
+            output_format=output_format,
+            progress_callback=progress_callback,
+            include_diarization=include_diarization,
+        )
 
         processing_time = time.time() - start_time
         _update_stats(successful=1, total_processing_time=processing_time)
@@ -483,13 +476,18 @@ class ModelRequestHandler(BaseHTTPRequestHandler):
             self._send_error(f"Audio file not found: {input_path}", 404)
             return
 
+        # Optional per-request override; None keeps the server's default.
+        include_diarization = request_data.get("include_diarization")
+
         _update_stats(requests=1)
 
         try:
             start_time = time.time()
             logger.info(f"Processing audio file: {input_path}")
 
-            result = service.transcribe_existing_audio(input_path)
+            result = service.transcribe_existing_audio(
+                input_path, include_diarization=include_diarization
+            )
             processing_time = time.time() - start_time
             _update_stats(successful=1, total_processing_time=processing_time)
 

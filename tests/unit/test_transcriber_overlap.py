@@ -46,7 +46,7 @@ def _build_transcriber(*, include_diarization: bool) -> Transcriber:
     def slow_ensure_transcription_load():
         time.sleep(SLEEP)
 
-    def slow_ensure_diarization_load():
+    def slow_ensure_diarization_load(force=False):
         time.sleep(SLEEP)
 
     transcriber.transcription_engine.ensure_model_loaded = slow_ensure_transcription_load  # type: ignore[attr-defined]
@@ -57,7 +57,7 @@ def _build_transcriber(*, include_diarization: bool) -> Transcriber:
     transcriber.transcription_engine.transcribe = lambda _p: [  # type: ignore[attr-defined]
         {"start": 0.0, "end": 1.0, "text": "hello"}
     ]
-    transcriber.diarization_engine.diarize = lambda _p: [  # type: ignore[attr-defined]
+    transcriber.diarization_engine.diarize = lambda _p, enabled=None: [  # type: ignore[attr-defined]
         {"start": 0.0, "end": 1.0, "speaker": "SPEAKER_00"}
     ]
     return transcriber
@@ -97,7 +97,7 @@ def test_audio_extract_overlaps_model_load_without_diarization():
 def test_model_load_error_propagates():
     transcriber = _build_transcriber(include_diarization=True)
 
-    def boom():
+    def boom(force=False):
         raise RuntimeError("simulated cuda OOM during preload")
 
     transcriber.diarization_engine.ensure_model_loaded = boom  # type: ignore[attr-defined]
@@ -111,7 +111,7 @@ def test_preload_skipped_when_diarization_disabled():
 
     calls: List[str] = []
 
-    def track_diar_load():
+    def track_diar_load(force=False):
         calls.append("diar_load")
 
     transcriber.diarization_engine.ensure_model_loaded = track_diar_load  # type: ignore[attr-defined]

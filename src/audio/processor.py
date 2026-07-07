@@ -1,18 +1,25 @@
 import os
+import subprocess
+import tempfile
 import time
 import logging
 import wave
 from typing import Tuple, Optional, Generator, Iterator
 import numpy as np
-from moviepy.editor import VideoFileClip
-from moviepy.audio.io.AudioFileClip import AudioFileClip
-from contextlib import contextmanager
+import imageio_ffmpeg
 import threading
 
 from ..config import Config
 from ..cache.manager import CacheManager
 
 logger = logging.getLogger(__name__)
+
+# Whisper and Parakeet both consume 16kHz mono; extracting at the target rate
+# keeps temp WAVs ~5x smaller than source-rate stereo and skips a resample.
+TARGET_SAMPLE_RATE = 16000
+
+# Resolve the bundled ffmpeg binary once per process, not per extraction.
+FFMPEG_EXE = imageio_ffmpeg.get_ffmpeg_exe()
 
 
 def _resample_audio(audio: np.ndarray, orig_sr: int, target_sr: int) -> np.ndarray:
@@ -30,23 +37,38 @@ class TimeoutException(Exception):
     """Raised when an operation times out."""
     pass
 
-@contextmanager
-def timeout(seconds, message="Operation timed out"):
-    """Thread-based timeout context manager."""
-    timer = None
-    exception = TimeoutException(message)
-    
-    def timeout_handler():
-        nonlocal exception
-        raise exception
-    
-    try:
-        timer = threading.Timer(seconds, timeout_handler)
-        timer.start()
-        yield
-    finally:
-        if timer:
-            timer.cancel()
+
+def run_with_timeout(fn, seconds, message="Operation timed out"):
+    """Run fn() and raise TimeoutException in the caller if it exceeds seconds.
+
+    Replaces the old threading.Timer-based context manager, which raised in
+    the timer thread and therefore never actually interrupted anything.
+
+    The work runs in a daemon thread (a plain Thread, not an executor:
+    concurrent.futures registers an atexit hook that joins its workers, so an
+    abandoned executor thread would block interpreter shutdown forever). On
+    timeout the caller is unblocked while the abandoned thread runs to
+    completion in the background — Python cannot kill a thread stuck in a C
+    extension — so a timed-out model call may still hold the model busy;
+    callers sharing one model instance (the model server) should treat a
+    timeout as a signal to restart rather than immediately reuse the model.
+    """
+    outcome = {}
+
+    def _target():
+        try:
+            outcome["result"] = fn()
+        except BaseException as exc:  # propagate to the caller thread
+            outcome["error"] = exc
+
+    worker = threading.Thread(target=_target, name="timeout-guard", daemon=True)
+    worker.start()
+    worker.join(timeout=seconds)
+    if worker.is_alive():
+        raise TimeoutException(message)
+    if "error" in outcome:
+        raise outcome["error"]
+    return outcome["result"]
 
 class AudioProcessor:
     """Handles audio extraction and processing for transcription."""
@@ -64,17 +86,6 @@ class AudioProcessor:
         
         # Initialize cache manager if caching is enabled
         self.cache_manager = CacheManager(config) if config.cache_enabled else None
-    
-    def is_audio_file(self, file_path: str) -> bool:
-        """Check if the file is an audio file based on extension.
-        
-        Args:
-            file_path: Path to the file
-            
-        Returns:
-            True if the file is an audio file, False otherwise
-        """
-        return file_path.lower().endswith(('.wav', '.mp3', '.m4a', '.aac', '.flac', '.ogg'))
     
     def get_audio_path(self, input_path: str) -> tuple[str, bool]:
         """
@@ -96,112 +107,106 @@ class AudioProcessor:
         if not os.path.exists(input_path):
             logger.error(f"Input file not found: {input_path}")
             raise FileNotFoundError(f"Input file not found: {input_path}")
-        
+
         # Check if we have a cached version
         if self.cache_manager:
             cached_audio = self.cache_manager.get_cached_audio(input_path)
             if cached_audio:
                 return cached_audio, False
-            
+
         # If it's already a WAV file, return it
         if input_path.lower().endswith('.wav'):
             logger.info(f"Input is already a WAV file: {input_path}")
             return input_path, False
-        
-        # If it's an audio file, convert it to WAV
-        if self.is_audio_file(input_path):
-            # Convert non-WAV audio to WAV
-            logger.info(f"Converting audio file to WAV format: {input_path}")
-            wav_path = input_path.rsplit(".", 1)[0] + ".wav"
-            try:
-                with timeout(self.timeout_seconds, "Audio conversion timed out"):
-                    audio = AudioFileClip(input_path)
-                    audio.write_audiofile(wav_path, logger=None)
-                    audio.close()
-                    
-                    # Cache the converted audio if caching is enabled
-                    if self.cache_manager:
-                        self.cache_manager.cache_audio(input_path, wav_path)
-                        
-                    return wav_path, True
-            except Exception as e:
-                if os.path.exists(wav_path):
-                    os.remove(wav_path)
-                logger.error(f"Error converting audio: {e}")
-                raise Exception(f"Error converting audio: {e}")
-        else:
-            # It's a video file, extract the audio
-            logger.info(f"Extracting audio from video file: {input_path}")
-            try:
-                wav_path = self.extract_audio(input_path)
-                
-                # Cache the extracted audio if caching is enabled
-                if self.cache_manager:
-                    self.cache_manager.cache_audio(input_path, wav_path)
-                    
-                return wav_path, True
-            except Exception as e:
-                logger.error(f"Error extracting audio: {e}")
-                raise Exception(f"Error extracting audio: {e}")
-    
+
+        # Extract/convert directly into the audio cache when caching is on:
+        # the cached WAV then has a stable path across runs, which keeps the
+        # downstream transcription/diarization cache keys stable too.
+        if self.cache_manager:
+            wav_path = self.cache_manager.audio_cache_path(input_path)
+            self._extract_to_wav(input_path, wav_path)
+            return wav_path, False
+
+        fd, wav_path = tempfile.mkstemp(suffix=".wav", prefix="whisperbox_")
+        os.close(fd)
+        try:
+            self._extract_to_wav(input_path, wav_path)
+        except Exception:
+            if os.path.exists(wav_path):
+                os.remove(wav_path)
+            raise
+        return wav_path, True
+
     def extract_audio(self, video_path: str) -> str:
-        """Extract audio from a video file.
-        
+        """Extract audio from a video file to a temporary 16kHz mono WAV.
+
         Args:
             video_path: Path to the video file
-            
+
         Returns:
-            Path to the extracted audio file
-            
+            Path to the extracted audio file (caller owns cleanup)
+
         Raises:
             TimeoutException: If audio extraction times out
             Exception: If audio extraction fails
         """
-        # Check if the file exists
         if not os.path.exists(video_path):
             logger.error(f"Video file not found: {video_path}")
             raise FileNotFoundError(f"Video file not found: {video_path}")
-            
-        # Create output path
-        output_dir = os.path.dirname(video_path)
-        base_name = os.path.splitext(os.path.basename(video_path))[0]
-        wav_path = os.path.join(output_dir, f"{base_name}.wav")
-        
-        logger.info(f"Extracting audio from video: {video_path}")
-        
+
+        fd, wav_path = tempfile.mkstemp(suffix=".wav", prefix="whisperbox_")
+        os.close(fd)
         try:
-            with timeout(self.timeout_seconds, "Audio extraction timed out"):
-                # Load the video
-                video = VideoFileClip(video_path)
-                
-                # Check if the video has audio
-                if not video.audio:
-                    video.close()
-                    raise Exception(f"No audio track found in video: {video_path}")
-                
-                logger.info(f"Video duration: {video.duration} seconds")
-                logger.info("Extracting audio... (this may take a few minutes)")
-                
-                start_time = time.time()
-                
-                # Extract audio
-                video.audio.write_audiofile(wav_path, logger=None)
-                
-                elapsed = time.time() - start_time
-                logger.info(f"Audio extraction complete in {elapsed:.1f} seconds")
-                
-                video.close()
-                return wav_path
-        except TimeoutException as e:
-            logger.error(f"Timeout during audio extraction: {e}")
+            self._extract_to_wav(video_path, wav_path)
+        except Exception:
             if os.path.exists(wav_path):
                 os.remove(wav_path)
             raise
-        except Exception as e:
-            logger.error(f"Error during audio extraction: {e}")
-            if os.path.exists(wav_path):
-                os.remove(wav_path)
-            raise Exception(f"Error extracting audio: {e}")
+        return wav_path
+
+    def _extract_to_wav(self, input_path: str, wav_path: str):
+        """Decode any audio/video input straight to a 16kHz mono PCM WAV.
+
+        Runs ffmpeg as a single subprocess (no PCM piping through Python) so
+        the extraction is one pass and the timeout is actually enforced.
+        """
+        logger.info(f"Extracting 16kHz mono audio: {input_path} -> {wav_path}")
+        # Write to a temp name and rename into place so a killed run can never
+        # leave a truncated WAV at the final path (which the cache would then
+        # treat as a valid hit).
+        partial_path = f"{wav_path}.part{os.getpid()}.wav"
+        cmd = [
+            FFMPEG_EXE,
+            "-y", "-nostdin",
+            "-i", input_path,
+            "-vn",
+            "-ac", "1",
+            "-ar", str(TARGET_SAMPLE_RATE),
+            "-acodec", "pcm_s16le",
+            "-f", "wav",
+            partial_path,
+        ]
+        start_time = time.time()
+        try:
+            result = subprocess.run(
+                cmd, capture_output=True, timeout=self.timeout_seconds
+            )
+        except subprocess.TimeoutExpired:
+            if os.path.exists(partial_path):
+                os.remove(partial_path)
+            logger.error(f"Audio extraction timed out after {self.timeout_seconds}s")
+            raise TimeoutException("Audio extraction timed out")
+
+        if result.returncode != 0:
+            if os.path.exists(partial_path):
+                os.remove(partial_path)
+            stderr_tail = result.stderr.decode("utf-8", errors="replace")[-500:]
+            logger.error(f"ffmpeg failed for {input_path}: {stderr_tail}")
+            raise Exception(f"Error extracting audio: {stderr_tail}")
+
+        os.replace(partial_path, wav_path)
+        elapsed = time.time() - start_time
+        logger.info(f"Audio extraction complete in {elapsed:.1f} seconds")
     
     def load_audio(self, audio_path: str, target_sr: int = 16000) -> np.ndarray:
         """Load audio file into memory with efficient processing.

@@ -35,8 +35,18 @@ class Config:
         self.diarization_model = os.getenv("DIARIZATION_MODEL", "pyannote/speaker-diarization-community-1")
         self.language = os.getenv("LANGUAGE", "en")
 
-        # ASR engine selection
-        self.transcription_engine = os.getenv("TRANSCRIPTION_ENGINE", "whisper").strip().lower()
+        # ASR engine selection. Parakeet (MLX) is roughly an order of magnitude
+        # faster than Whisper-on-CPU, but only exists on Apple Silicon.
+        default_engine = (
+            "parakeet"
+            if sys.platform == "darwin" and platform.machine() == "arm64"
+            else "whisper"
+        )
+        self.transcription_engine = os.getenv("TRANSCRIPTION_ENGINE", default_engine).strip().lower()
+        # Whether the engine came from the platform default rather than an
+        # explicit request; a defaulted parakeet may fall back to whisper if
+        # parakeet-mlx isn't installed (older venvs), an explicit one may not.
+        self.transcription_engine_defaulted = os.getenv("TRANSCRIPTION_ENGINE") is None
         self.parakeet_model = os.getenv("PARAKEET_MODEL", "mlx-community/parakeet-tdt-0.6b-v3")
 
         # Parse output format
@@ -56,6 +66,16 @@ class Config:
         self.audio_timeout = int(os.getenv("AUDIO_TIMEOUT", "300"))
         self.transcribe_timeout = int(os.getenv("TRANSCRIBE_TIMEOUT", "3600"))
         self.diarize_timeout = int(os.getenv("DIARIZE_TIMEOUT", "3600"))
+
+        # Whisper (faster-whisper/ctranslate2) tuning.
+        # WHISPER_BEAM_SIZE=1 (greedy) is ~2x faster than the default 5-way beam.
+        # WHISPER_CPU_THREADS=0 keeps ctranslate2's default (4); higher values
+        # use more of the machine on the CPU-bound path.
+        # WHISPER_BATCH_SIZE>0 enables BatchedInferencePipeline (parallel
+        # chunk decoding); 0 keeps the sequential decoder.
+        self.whisper_beam_size = int(os.getenv("WHISPER_BEAM_SIZE", "5"))
+        self.whisper_cpu_threads = int(os.getenv("WHISPER_CPU_THREADS", "0"))
+        self.whisper_batch_size = int(os.getenv("WHISPER_BATCH_SIZE", "0"))
 
         # Device settings
         self.force_cpu = os.getenv("FORCE_CPU", "false").strip().lower() in ["true", "1", "yes", "on"]
@@ -85,6 +105,7 @@ class Config:
             self.force_cpu = bool(overrides['force_cpu'])
         if 'transcription_engine' in overrides:
             self.transcription_engine = str(overrides['transcription_engine']).strip().lower()
+            self.transcription_engine_defaulted = False
         if 'parakeet_model' in overrides:
             self.parakeet_model = overrides['parakeet_model']
 
@@ -129,6 +150,9 @@ class Config:
             "max_cache_size": self.max_cache_size,
             "transcription_engine": self.transcription_engine,
             "parakeet_model": self.parakeet_model,
+            "whisper_beam_size": self.whisper_beam_size,
+            "whisper_cpu_threads": self.whisper_cpu_threads,
+            "whisper_batch_size": self.whisper_batch_size,
         }
     
     def validate(self) -> bool:

@@ -127,8 +127,35 @@ class TestEngineSelection:
     def test_defaults(self, monkeypatch):
         _clear_engine_env(monkeypatch)
         cfg = Config()
-        assert cfg.transcription_engine == "whisper"
+        expected = (
+            "parakeet"
+            if sys.platform == "darwin" and platform.machine() == "arm64"
+            else "whisper"
+        )
+        assert cfg.transcription_engine == expected
         assert cfg.parakeet_model == "mlx-community/parakeet-tdt-0.6b-v3"
+
+    def test_default_engine_is_parakeet_on_apple_silicon(self, monkeypatch):
+        _clear_engine_env(monkeypatch)
+        monkeypatch.setattr(sys, "platform", "darwin")
+        monkeypatch.setattr(platform, "machine", lambda: "arm64")
+        cfg = Config()
+        assert cfg.transcription_engine == "parakeet"
+
+    def test_default_engine_is_whisper_off_apple_silicon(self, monkeypatch):
+        _clear_engine_env(monkeypatch)
+        monkeypatch.setattr(sys, "platform", "linux")
+        monkeypatch.setattr(platform, "machine", lambda: "x86_64")
+        cfg = Config()
+        assert cfg.transcription_engine == "whisper"
+
+    def test_env_overrides_platform_default(self, monkeypatch):
+        _clear_engine_env(monkeypatch)
+        monkeypatch.setattr(sys, "platform", "darwin")
+        monkeypatch.setattr(platform, "machine", lambda: "arm64")
+        monkeypatch.setenv("TRANSCRIPTION_ENGINE", "whisper")
+        cfg = Config()
+        assert cfg.transcription_engine == "whisper"
 
     def test_env_override(self, monkeypatch):
         monkeypatch.setenv("TRANSCRIPTION_ENGINE", "Parakeet")
@@ -147,7 +174,7 @@ class TestEngineSelection:
         _clear_engine_env(monkeypatch)
         cfg = Config()
         d = cfg.to_dict()
-        assert d["transcription_engine"] == "whisper"
+        assert d["transcription_engine"] == cfg.transcription_engine
         assert d["parakeet_model"] == "mlx-community/parakeet-tdt-0.6b-v3"
 
     def test_validate_rejects_unknown_engine(self, monkeypatch):
@@ -168,3 +195,32 @@ class TestEngineSelection:
         monkeypatch.setattr(sys, "platform", "darwin")
         monkeypatch.setattr(platform, "machine", lambda: "arm64")
         assert cfg.validate() is True
+
+
+class TestWhisperTuning:
+    def _clear(self, monkeypatch):
+        for var in ("WHISPER_BEAM_SIZE", "WHISPER_CPU_THREADS", "WHISPER_BATCH_SIZE"):
+            monkeypatch.delenv(var, raising=False)
+
+    def test_defaults(self, monkeypatch):
+        self._clear(monkeypatch)
+        cfg = Config()
+        assert cfg.whisper_beam_size == 5
+        assert cfg.whisper_cpu_threads == 0  # 0 = ctranslate2 default
+        assert cfg.whisper_batch_size == 0   # 0 = batched pipeline disabled
+
+    def test_env_overrides(self, monkeypatch):
+        monkeypatch.setenv("WHISPER_BEAM_SIZE", "1")
+        monkeypatch.setenv("WHISPER_CPU_THREADS", "8")
+        monkeypatch.setenv("WHISPER_BATCH_SIZE", "16")
+        cfg = Config()
+        assert cfg.whisper_beam_size == 1
+        assert cfg.whisper_cpu_threads == 8
+        assert cfg.whisper_batch_size == 16
+
+    def test_to_dict_includes_tuning(self, monkeypatch):
+        self._clear(monkeypatch)
+        d = Config().to_dict()
+        assert d["whisper_beam_size"] == 5
+        assert d["whisper_cpu_threads"] == 0
+        assert d["whisper_batch_size"] == 0

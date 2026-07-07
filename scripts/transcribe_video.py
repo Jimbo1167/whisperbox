@@ -17,7 +17,7 @@ from pathlib import Path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from src.config import Config
-from src.service import TranscriptionService
+from src.server_client import transcribe_with_server_fallback
 
 logger = logging.getLogger(__name__)
 
@@ -84,14 +84,14 @@ def main():
         logger.error("Invalid configuration. Please check your settings.")
         sys.exit(1)
     
-    service = TranscriptionService(config)
-    
     # Set default output path if not specified
     if args.output is None:
         args.output = get_default_output_path(args.input_path, config.output_format)
-    
+
     logger.info(f"\nProcessing {args.input_path}...")
-    service.transcribe_file(args.input_path, output_path=args.output)
+    # CLI overrides are already applied to config; the helper checks the
+    # server's /status against config and falls back locally on any mismatch.
+    transcribe_with_server_fallback(args.input_path, config, args.output)
     
     elapsed_time = time.time() - start_time
     logger.info(f"\nDone! Transcript saved.")
