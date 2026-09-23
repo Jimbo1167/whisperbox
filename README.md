@@ -170,7 +170,7 @@ make docker-run
 Edit the `.env` file to configure:
 
 - `HF_TOKEN`: Your HuggingFace token for accessing models
-- `TRANSCRIPTION_ENGINE`: ASR engine to use (`whisper` or `parakeet`, default `whisper`). See [Transcription engines](#transcription-engines) below.
+- `TRANSCRIPTION_ENGINE`: ASR engine to use (`whisper` or `parakeet`; default `parakeet` on Apple Silicon, `whisper` elsewhere). See [Transcription engines](#transcription-engines) below.
 - `WHISPER_MODEL`: Whisper model size (tiny, base, small, medium, large)
 - `PARAKEET_MODEL`: HF model id or local path to MLX-format weights (default `mlx-community/parakeet-tdt-0.6b-v3`). Only used when `TRANSCRIPTION_ENGINE=parakeet`.
 - `LANGUAGE`: Target language for transcription (default: en)
@@ -215,7 +215,7 @@ export PARAKEET_MODEL=/path/to/local/mlx-checkpoint
 
 - **Apple Silicon only.** Setting `TRANSCRIPTION_ENGINE=parakeet` on Linux, Docker, or Intel macOS is rejected at config validation. The `parakeet-mlx` dependency in `requirements.txt` carries a platform marker so non-Apple-Silicon installs skip it entirely.
 - **`FORCE_CPU` is Whisper-only.** MLX runs on Apple Silicon with no equivalent knob; if `FORCE_CPU=true` is set with `engine=parakeet`, a warning is logged and the flag is ignored.
-- **Streaming is Whisper-only.** Calling streaming entry points with `engine=parakeet` raises `NotImplementedError`. Use the batch `transcribe()` path.
+- **Streaming is Whisper-only.** Calling streaming entry points with `engine=parakeet` raises `NotImplementedError`. Use the batch `transcribe()` path. The CLI's `stream` command uses Whisper instead when Parakeet is only the Apple Silicon default (`TRANSCRIPTION_ENGINE` unset); an explicit `TRANSCRIPTION_ENGINE=parakeet` still fails.
 - **Handy weights are not compatible.** Handy ships INT8 ONNX weights; `parakeet-mlx` requires MLX-format weights. Users wanting to reuse Handy's weights would need a different runtime (e.g. `onnx-asr`) — out of scope here.
 
 ## Usage

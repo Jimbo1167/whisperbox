@@ -99,6 +99,16 @@ def main(argv=None):
     
     config = Config(**config_kwargs)
     
+    # Streaming is Whisper-only. Parakeet may just be the Apple Silicon
+    # default, so stream with Whisper rather than failing out of the box; an
+    # explicitly chosen engine is kept (and refused by the transcriber).
+    if config.transcription_engine_defaulted and config.transcription_engine != "whisper":
+        logger.info(
+            f"Streaming requires Whisper; using it instead of the default "
+            f"{config.transcription_engine} engine"
+        )
+        config.transcription_engine = "whisper"
+    
     # Generate output path if not specified
     if not args.output_path:
         input_file = Path(args.input_path)

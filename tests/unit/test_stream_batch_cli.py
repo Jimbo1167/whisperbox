@@ -4,6 +4,7 @@ scripts, and propagation of those scripts' exit status."""
 from __future__ import annotations
 
 import importlib.util
+import platform
 import sys
 from pathlib import Path
 
@@ -94,3 +95,30 @@ def test_stream_exits_nonzero_when_transcription_fails(
 
     assert result.exit_code == 1
 
+
+def test_stream_uses_whisper_when_parakeet_is_only_the_platform_default(
+    monkeypatch, audio_file, tmp_path
+):
+    """Parakeet is the Apple Silicon default but can't stream, so `stream`
+    shouldn't fail out of the box there."""
+    monkeypatch.delenv("TRANSCRIPTION_ENGINE", raising=False)
+    monkeypatch.setattr(sys, "platform", "darwin")
+    monkeypatch.setattr(platform, "machine", lambda: "arm64")
+    monkeypatch.setattr(stream_transcribe, "Transcriber", FakeTranscriber)
+    output = tmp_path / "out.txt"
+
+    result = _run("stream", audio_file, "--output", str(output))
+
+    assert result.exit_code == 0, result.output
+    assert output.read_text() == "hello world"
+
+
+def test_stream_keeps_an_explicitly_chosen_engine(monkeypatch, audio_file):
+    """An explicit TRANSCRIPTION_ENGINE=parakeet isn't silently swapped for
+    Whisper; the transcriber refuses to stream and the command fails."""
+    monkeypatch.setenv("TRANSCRIPTION_ENGINE", "parakeet")
+    monkeypatch.setattr(stream_transcribe, "Transcriber", FakeTranscriber)
+
+    result = _run("stream", audio_file)
+
+    assert result.exit_code == 1
