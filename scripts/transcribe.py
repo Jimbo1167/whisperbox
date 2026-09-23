@@ -210,10 +210,10 @@ def stream(input_path, output, diarize, words, model, language, output_format):
     from scripts.stream_transcribe import main as stream_main
     
     # Prepare arguments
-    args = ['--input', input_path]
+    args = [input_path]
     
     if output:
-        args.extend(['--output', output])
+        args.extend(['--output-path', output])
     if diarize:
         args.append('--diarize')
     if words:
@@ -225,8 +225,9 @@ def stream(input_path, output, diarize, words, model, language, output_format):
     if output_format:
         args.extend(['--format', output_format])
     
-    # Run stream transcribe script
-    stream_main(args)
+    # Run stream transcribe script, propagating its exit status so callers can
+    # detect a failed transcription
+    sys.exit(stream_main(args))
 
 @cli.command()
 @click.argument('input_pattern', type=str)
@@ -276,8 +277,9 @@ def batch(input_pattern, output_dir, workers, adaptive, diarize, streaming,
     if output_format:
         args.extend(['--format', output_format])
     
-    # Run batch transcribe script
-    batch_main(args)
+    # Run batch transcribe script, propagating its exit status so callers can
+    # detect a failure (e.g. no files matching the pattern)
+    sys.exit(batch_main(args))
 
 @cli.command()
 @click.option('--host', type=str, default='localhost',

@@ -31,7 +31,7 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
-def main():
+def main(argv=None):
     """Main function for the streaming transcription script."""
     parser = argparse.ArgumentParser(
         description="Transcribe audio or video files using streaming to reduce memory usage"
@@ -75,7 +75,7 @@ def main():
         help="Enable verbose logging"
     )
     
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     
     # Set up logging level
     if args.verbose:
