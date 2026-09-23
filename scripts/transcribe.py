@@ -335,8 +335,9 @@ def client(server, command, args):
     # Add any additional arguments
     cmd_args.extend(args)
     
-    # Run model client script
-    client_main(cmd_args)
+    # Run model client script, propagating its exit status so callers can
+    # detect a failed job
+    sys.exit(client_main(cmd_args))
 
 @cli.command()
 def completion():
