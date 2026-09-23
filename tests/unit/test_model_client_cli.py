@@ -33,9 +33,10 @@ class FakeJobServer(BaseHTTPRequestHandler):
     """Mimics model_server.py: POST queues a job, GET /api/jobs/<id> reports it."""
 
     job = None
+    last_post_body = None
 
     def do_POST(self):
-        self.rfile.read(int(self.headers.get("Content-Length", 0)))
+        type(self).last_post_body = self.rfile.read(int(self.headers.get("Content-Length", 0)))
         self._send_json({"job_id": "job1", "status": "queued"}, status=202)
 
     def do_GET(self):
@@ -59,6 +60,7 @@ class FakeJobServer(BaseHTTPRequestHandler):
 @pytest.fixture
 def job_server():
     FakeJobServer.job = None
+    FakeJobServer.last_post_body = None
     server = HTTPServer(("127.0.0.1", _free_port()), FakeJobServer)
     thread = threading.Thread(
         target=server.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True
@@ -116,3 +118,30 @@ def test_client_transcribe_prints_transcript_when_job_completes(job_server, inpu
     assert "[00:00.000 --> 00:01.500] hello world" in result.output
     assert "[00:01.500 --> 00:03.000] (SPEAKER_00) second line" in result.output
 
+
+def test_client_transcribe_forwards_diarize_flag_to_server(job_server, input_file):
+    """`client transcribe FILE --diarize` is how the transcribe-locally skill asks for speakers."""
+    FakeJobServer.job = _completed_job()
+
+    result = _run_client(job_server, input_file, "--diarize")
+
+    assert result.exit_code == 0, result.output
+    body = FakeJobServer.last_post_body
+    assert b'name="diarize"' in body
+    diarize_value = body.split(b'name="diarize"', 1)[1].split(b"--", 1)[0]
+    assert diarize_value.strip() == b"true"
+
+
+def test_client_transcribe_writes_output_file_when_job_completes(
+    job_server, input_file, tmp_path
+):
+    FakeJobServer.job = _completed_job()
+    output = tmp_path / "out.txt"
+
+    result = _run_client(job_server, input_file, "--output", str(output))
+
+    assert result.exit_code == 0, result.exception
+    assert output.read_text().splitlines() == [
+        "[00:00.000 --> 00:01.500] hello world",
+        "[00:01.500 --> 00:03.000] (SPEAKER_00) second line",
+    ]
