@@ -405,13 +405,24 @@ class ParakeetEngine:
             self.parakeet = MockParakeetModel()
             return
 
-        # Lazy import: parakeet_mlx is darwin/arm64 only and imported only
-        # when actually needed. Test patch target is `parakeet_mlx.from_pretrained`.
+        # Lazy import: parakeet_mlx (and its mlx dependency) is darwin/arm64
+        # only and imported only when actually needed. Test patch targets are
+        # `parakeet_mlx.from_pretrained` and `mlx.core`.
+        import mlx.core as mx  # noqa: WPS433
         import parakeet_mlx  # noqa: WPS433
 
         try:
             logger.info(f"Loading parakeet-mlx model: {self.parakeet_model_id}")
-            self.parakeet = parakeet_mlx.from_pretrained(self.parakeet_model_id)
+            model = parakeet_mlx.from_pretrained(self.parakeet_model_id)
+            # from_pretrained returns lazy weights whose pending load/astype
+            # ops are bound to this thread's MLX stream, and MLX streams are
+            # per-thread. Inference always runs on another thread (the model
+            # server's job threads, run_with_timeout's worker), where
+            # evaluating them fails with "There is no Stream(gpu, 0) in
+            # current thread" — so materialize them here, which also makes
+            # the warm server's first request fast.
+            mx.eval(model.parameters())
+            self.parakeet = model
             logger.info("parakeet-mlx model loaded successfully")
         except Exception as e:
             logger.error(f"Error loading parakeet-mlx model: {e}")

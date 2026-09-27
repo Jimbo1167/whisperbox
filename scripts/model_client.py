@@ -128,7 +128,7 @@ def transcribe_file(server_url, file_path, options=None):
                     
                     if job_status['status'] == 'completed':
                         progress.set_description("Completed")
-                        progress.update_to(file_size, "Completed")
+                        progress.completed = file_size
                         return job_status['result']
                     elif job_status['status'] == 'failed':
                         progress.set_description("Failed")
@@ -148,7 +148,7 @@ def transcribe_file(server_url, file_path, options=None):
             else:
                 # Immediate response
                 progress.set_description("Completed")
-                progress.update_to(file_size, "Completed")
+                progress.completed = file_size
                 return result
                 
     except requests.exceptions.RequestException as e:
@@ -159,6 +159,23 @@ def transcribe_file(server_url, file_path, options=None):
         if 'files' in locals() and 'file' in files:
             files['file'].close()
 
+def format_segment(segment):
+    """Format a server segment as ``[MM:SS.mmm --> MM:SS.mmm] (speaker) text``.
+
+    The server sends segments as ``[start, end, text, speaker]`` lists (the
+    transcriber's tuples, JSON-encoded).
+    """
+    start, end, text, speaker = segment
+
+    # Format timestamp as [MM:SS.mmm]
+    start_str = f"{int(start // 60):02d}:{int(start % 60):02d}.{int((start % 1) * 1000):03d}"
+    end_str = f"{int(end // 60):02d}:{int(end % 60):02d}.{int((end % 1) * 1000):03d}"
+
+    # Add speaker if available
+    speaker_str = f" ({speaker})" if speaker else ""
+
+    return f"[{start_str} --> {end_str}]{speaker_str} {text}"
+
 def display_transcription(result):
     """Display the transcription result."""
     if not result:
@@ -168,19 +185,7 @@ def display_transcription(result):
     
     if 'segments' in result:
         for segment in result['segments']:
-            start = segment.get('start', 0)
-            end = segment.get('end', 0)
-            text = segment.get('text', '')
-            speaker = segment.get('speaker', '')
-            
-            # Format timestamp as [MM:SS.mmm]
-            start_str = f"{int(start // 60):02d}:{int(start % 60):02d}.{int((start % 1) * 1000):03d}"
-            end_str = f"{int(end // 60):02d}:{int(end % 60):02d}.{int((end % 1) * 1000):03d}"
-            
-            # Add speaker if available
-            speaker_str = f" ({speaker})" if speaker else ""
-            
-            print(f"[{start_str} --> {end_str}]{speaker_str} {text}")
+            print(format_segment(segment))
     else:
         # Simple text output
         print(result.get('text', 'No text available'))
@@ -321,19 +326,7 @@ def main(argv=None):
                             # For text formats, write the formatted output
                             if 'segments' in result:
                                 for segment in result['segments']:
-                                    start = segment.get('start', 0)
-                                    end = segment.get('end', 0)
-                                    text = segment.get('text', '')
-                                    speaker = segment.get('speaker', '')
-                                    
-                                    # Format timestamp as [MM:SS.mmm]
-                                    start_str = f"{int(start // 60):02d}:{int(start % 60):02d}.{int((start % 1) * 1000):03d}"
-                                    end_str = f"{int(end // 60):02d}:{int(end % 60):02d}.{int((end % 1) * 1000):03d}"
-                                    
-                                    # Add speaker if available
-                                    speaker_str = f" ({speaker})" if speaker else ""
-                                    
-                                    f.write(f"[{start_str} --> {end_str}]{speaker_str} {text}\n")
+                                    f.write(format_segment(segment) + "\n")
                             else:
                                 # Simple text output
                                 f.write(result.get('text', 'No text available'))

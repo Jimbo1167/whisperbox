@@ -4,13 +4,16 @@ Notes for implementers:
 - `parakeet_mlx` is imported lazily inside `ParakeetEngine._load_model`
   via `import parakeet_mlx` + attribute access. The patch target is
   `parakeet_mlx` in `sys.modules`, NOT `src.transcription.engine.from_pretrained`.
+  `mlx.core` is imported lazily there too.
 - We never import `parakeet_mlx` in tests — the lazy import is what keeps
-  Linux/CI clean.
+  Linux/CI clean. The MLX threading regression test uses real `mlx` and is
+  skipped where it isn't installed.
 """
 
 import sys
 import wave
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import numpy as np
@@ -137,9 +140,58 @@ def test_load_model_uses_parakeet_mlx_from_pretrained_lazily(parakeet_config):
     fake_model = MagicMock()
     fake_pkg = MagicMock()
     fake_pkg.from_pretrained = MagicMock(return_value=fake_model)
+    fake_mx = MagicMock()
+    fake_mlx = MagicMock(core=fake_mx)
 
-    with patch.dict(sys.modules, {"parakeet_mlx": fake_pkg}):
+    with patch.dict(
+        sys.modules,
+        {"parakeet_mlx": fake_pkg, "mlx": fake_mlx, "mlx.core": fake_mx},
+    ):
         engine._load_model()
 
     fake_pkg.from_pretrained.assert_called_once_with(parakeet_config.parakeet_model)
+    # Weights are materialized on the loading thread (see the threading test below).
+    fake_mx.eval.assert_called_once_with(fake_model.parameters.return_value)
     assert engine.parakeet is fake_model
+
+
+def test_model_loaded_on_one_thread_transcribes_on_another(parakeet_config, tmp_path):
+    """Regression: "There is no Stream(gpu, 0) in current thread."
+
+    MLX streams are per-thread. parakeet_mlx.from_pretrained returns weights
+    that are still unevaluated graph nodes bound to the loading thread's
+    stream, and inference always runs on a different thread (the model
+    server loads at startup on the main thread; run_with_timeout runs every
+    transcription on a fresh thread). Loading must materialize the weights.
+    """
+    mx = pytest.importorskip("mlx.core")
+    nn = pytest.importorskip("mlx.nn")
+    from src.transcription.engine import ParakeetEngine
+
+    class LazyWeightsModel(nn.Module):
+        """Mimics from_pretrained's result: a pending astype on the weights."""
+
+        def __init__(self):
+            super().__init__()
+            self.weight = mx.ones((4, 4)).astype(mx.bfloat16)
+
+        def transcribe(self, audio_path, **kwargs):
+            total = (self.weight @ mx.ones((4, 1), dtype=mx.bfloat16)).sum().item()
+            token = SimpleNamespace(text="Hello", start=0.0, end=1.0)
+            return SimpleNamespace(sentences=[
+                SimpleNamespace(text=f"Hello {total:g}", start=0.0, end=1.0, tokens=[token]),
+            ])
+
+    fake_pkg = MagicMock()
+    fake_pkg.from_pretrained = MagicMock(side_effect=lambda _: LazyWeightsModel())
+    audio = tmp_path / "x.wav"
+    _make_wav(audio)
+
+    engine = ParakeetEngine(parakeet_config, test_mode=False)
+    with patch.dict(sys.modules, {"parakeet_mlx": fake_pkg}):
+        engine.ensure_model_loaded()  # this (main) thread, like the server
+
+    # Each call runs on its own fresh thread; back-to-back jobs must both work.
+    for _ in range(2):
+        segments = engine.transcribe(str(audio))
+        assert [s["text"] for s in segments] == ["Hello 16"]

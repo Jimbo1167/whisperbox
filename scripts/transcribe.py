@@ -311,11 +311,11 @@ def server(host, port, config):
     # Run model server script
     server_main(args)
 
-@cli.command()
+@cli.command(context_settings=dict(ignore_unknown_options=True))
 @click.option('--server', type=str, default='http://localhost:8000',
               help='URL of the model server.')
 @click.argument('command', type=click.Choice(['status', 'transcribe']))
-@click.argument('args', nargs=-1)
+@click.argument('args', nargs=-1, type=click.UNPROCESSED)
 def client(server, command, args):
     """Interact with the model server.
     
@@ -335,8 +335,9 @@ def client(server, command, args):
     # Add any additional arguments
     cmd_args.extend(args)
     
-    # Run model client script
-    client_main(cmd_args)
+    # Run model client script, propagating its exit status so callers can
+    # detect a failed job
+    sys.exit(client_main(cmd_args))
 
 @cli.command()
 def completion():
