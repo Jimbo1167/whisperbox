@@ -205,12 +205,13 @@ def stream(input_path, output, diarize, words, model, language, output_format):
     Examples:
         stream large_video.mp4
         stream podcast.mp3 --diarize
+        stream interview.wav --words -f json
     """
     # Import here to avoid circular imports
     from scripts.stream_transcribe import main as stream_main
     
-    # Prepare arguments
-    args = ['--input', input_path]
+    # Prepare arguments (stream_transcribe takes the input positionally)
+    args = [input_path]
     
     if output:
         args.extend(['--output', output])
@@ -225,8 +226,10 @@ def stream(input_path, output, diarize, words, model, language, output_format):
     if output_format:
         args.extend(['--format', output_format])
     
-    # Run stream transcribe script
-    stream_main(args)
+    # Run stream transcribe script; it reports failure via its return code
+    exit_code = stream_main(args)
+    if exit_code:
+        sys.exit(exit_code)
 
 @cli.command()
 @click.argument('input_pattern', type=str)

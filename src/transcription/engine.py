@@ -265,12 +265,15 @@ class WhisperEngine:
             # Get the result or raise the exception
             return future.result()
     
-    def transcribe_stream(self, audio_stream: Iterator[np.ndarray]) -> Generator[Dict[str, Any], None, None]:
+    def transcribe_stream(
+        self, audio_stream: Iterator[np.ndarray], word_timestamps: bool = False
+    ) -> Generator[Dict[str, Any], None, None]:
         """
         Transcribe an audio stream and yield segments as they become available.
         
         Args:
             audio_stream: Iterator yielding chunks of audio data as numpy arrays
+            word_timestamps: Populate each segment's ``words`` with per-word timing
             
         Yields:
             Transcription segments as they become available
@@ -289,7 +292,9 @@ class WhisperEngine:
         start_time = time.time()
         
         try:
-            streaming_transcriber = StreamingTranscriber(self.whisper, self.config)
+            streaming_transcriber = StreamingTranscriber(
+                self.whisper, self.config, word_timestamps=word_timestamps
+            )
             segment_count = 0
             
             for segment in streaming_transcriber.process_stream(audio_stream):
@@ -504,7 +509,7 @@ class ParakeetEngine:
 
     # Streaming is Whisper-only — defensive stubs in case the upstream guard
     # in transcriber.py is ever bypassed.
-    def transcribe_stream(self, audio_stream):
+    def transcribe_stream(self, audio_stream, word_timestamps: bool = False):
         raise NotImplementedError(
             "Streaming is only supported with TRANSCRIPTION_ENGINE=whisper. "
             "Use transcribe() for batch transcription with Parakeet."

@@ -297,12 +297,15 @@ class Transcriber:
         self.output_formatter.format = self.output_format
         self.output_formatter.save_transcript(segments, output_path)
     
-    def transcribe_stream(self, input_path: str) -> Generator[Dict[str, Any], None, None]:
+    def transcribe_stream(
+        self, input_path: str, word_timestamps: bool = False
+    ) -> Generator[Dict[str, Any], None, None]:
         """
         Transcribe an audio or video file using streaming to reduce memory usage.
 
         Args:
             input_path: Path to the audio or video file
+            word_timestamps: Populate each segment's ``words`` with per-word timing
 
         Yields:
             Transcription segments as they become available
@@ -330,7 +333,9 @@ class Transcriber:
             audio_stream = self.audio_processor.stream_audio_from_file(audio_path)
             
             # Transcribe the audio stream
-            for segment in self.transcription_engine.transcribe_stream(audio_stream):
+            for segment in self.transcription_engine.transcribe_stream(
+                audio_stream, word_timestamps=word_timestamps
+            ):
                 # For now, we don't include diarization in streaming mode
                 # as it requires the full audio file
                 yield segment
@@ -347,13 +352,16 @@ class Transcriber:
             logger.error(f"Error during streaming transcription: {str(e)}")
             raise
     
-    def transcribe_stream_with_diarization(self, input_path: str) -> Generator[Dict[str, Any], None, None]:
+    def transcribe_stream_with_diarization(
+        self, input_path: str, word_timestamps: bool = False
+    ) -> Generator[Dict[str, Any], None, None]:
         """
         Transcribe an audio or video file using streaming with diarization.
         This method first performs diarization on the entire file, then streams the transcription.
 
         Args:
             input_path: Path to the audio or video file
+            word_timestamps: Populate each segment's ``words`` with per-word timing
 
         Yields:
             Transcription segments with speaker information as they become available
@@ -392,7 +400,9 @@ class Transcriber:
             # transcripts). Diarization already ran over the whole file above,
             # so each streamed segment can be labeled and yielded immediately,
             # keeping consumers' live progress and partial-save behavior.
-            for segment in self.transcription_engine.transcribe_stream(audio_stream):
+            for segment in self.transcription_engine.transcribe_stream(
+                audio_stream, word_timestamps=word_timestamps
+            ):
                 if diarization_segments:
                     labeled = self._combine_segments_with_speakers(
                         [segment], diarization_segments
@@ -402,6 +412,7 @@ class Transcriber:
                         "end": labeled[1],
                         "text": labeled[2],
                         "speaker": labeled[3],
+                        "words": segment.get("words", []),
                     }
                 else:
                     yield segment
