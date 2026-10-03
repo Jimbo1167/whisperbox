@@ -1,5 +1,9 @@
 # Detailed Implementation Plan for Whisperbox Improvements
 
+> **Historical document (early 2025).** The restructuring described here is complete;
+> kept for reference only. Current docs live in [docs/](../index.md), and open ideas
+> are tracked in [FUTURE.md](../../FUTURE.md).
+
 Based on the analysis of your codebase, here's a comprehensive plan to implement the suggested improvements. This plan breaks down the work into manageable phases with specific tasks, estimated effort, and expected outcomes.
 
 ## Phase 1: Code Restructuring and Modularization (2-3 weeks)
@@ -467,8 +471,6 @@ To begin implementation, I recommend:
 2. Extract the `AudioProcessor` class as the first component
 3. Set up the testing framework and write initial tests
 4. Continue with the modularization of other components
-
-Would you like me to help with implementing any specific part of this plan, or would you like more details on any particular aspect?
 
 ## Implementation Progress
 

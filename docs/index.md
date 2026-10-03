@@ -31,7 +31,7 @@ Welcome to the Whisperbox documentation. This documentation provides comprehensi
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/whisperbox.git
+git clone https://github.com/Jimbo1167/whisperbox.git
 cd whisperbox
 
 # Set up the environment
@@ -45,16 +45,16 @@ cp .env.example .env
 
 ```bash
 # Transcribe a video file
-./scripts/transcribe.py transcribe path/to/your/video.mp4
+python -m scripts.transcribe transcribe path/to/your/video.mp4
 
 # Transcribe with specific options
-./scripts/transcribe.py transcribe path/to/your/video.mp4 --format srt --model medium --diarize
+python -m scripts.transcribe transcribe path/to/your/video.mp4 --format srt --model medium --diarize
 
-# Process multiple files in batch
-./scripts/transcribe.py batch path/to/directory/*.mp4
+# Process multiple files in batch (quote the glob pattern)
+python -m scripts.transcribe batch "path/to/directory/*.mp4"
 
 # Use streaming transcription for large files
-./scripts/transcribe.py stream path/to/your/large_video.mp4
+python -m scripts.transcribe stream path/to/your/large_video.mp4
 ```
 
 ### Using the Model Server
@@ -72,15 +72,15 @@ python -m scripts.model_client transcribe path/to/your/video.mp4
 
 ## Features
 
-- **Transcription**: Convert speech to text using OpenAI's Whisper models
+- **Transcription**: Convert speech to text with Parakeet (default on Apple Silicon) or Whisper (default elsewhere)
 - **Speaker Diarization**: Identify different speakers in the audio
 - **Multiple Input Formats**: Support for various video and audio formats
-- **Multiple Output Formats**: Support for TXT, SRT, VTT, and JSON formats
+- **Multiple Output Formats**: txt, pretty, srt, vtt, vtt-voice, json, json3
 - **Streaming Transcription**: Process large files with minimal memory usage
 - **Batch Processing**: Process multiple files in a single command
 - **Caching System**: Improve performance by caching results
 - **Progress Reporting**: Track progress with detailed progress bars
-- **Model Server**: Run a persistent model server for faster processing
+- **Model Server + Web UI**: Persistent model server with a drag-and-drop browser UI
 - **Enhanced CLI**: User-friendly command-line interface with subcommands
 
 ## Contributing

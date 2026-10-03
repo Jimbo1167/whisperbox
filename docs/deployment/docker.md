@@ -25,7 +25,7 @@ cp .env.example .env
 
 3. Edit the `.env` file to set your configuration values, especially:
    - `HF_TOKEN` (if you plan to use speaker diarization)
-   - `WHISPER_MODEL` (default is "base")
+   - `WHISPER_MODEL` (default is "large-v3-turbo")
    - `FORCE_CPU` (set to "false" if you want to use GPU)
 
 4. Build and start the Docker container:
@@ -37,13 +37,18 @@ make docker-run
 
 The transcription server will be available at http://localhost:8000.
 
+Note: the Docker image contains the HTTP API only — the `web/` directory is not
+copied into the image, so the drag-and-drop browser UI is not served from the
+container. Use the model client or direct HTTP requests below. (The Parakeet
+engine is also unavailable in Docker; it requires Apple Silicon.)
+
 ## Configuration Options
 
 You can configure the Docker deployment through environment variables in your `.env` file or by overriding them in the `docker-compose.yml` file:
 
 | Environment Variable | Description | Default |
 |---------------------|-------------|---------|
-| WHISPER_MODEL | Whisper model size (tiny, base, small, medium, large) | base |
+| WHISPER_MODEL | Whisper model size (tiny, base, small, medium, large-v3, large-v3-turbo) | large-v3-turbo |
 | OUTPUT_FORMAT | Output format (txt, srt, vtt, json) | txt |
 | INCLUDE_DIARIZATION | Enable speaker diarization | false |
 | FORCE_CPU | Force CPU usage instead of GPU | true |

@@ -5,29 +5,24 @@ A Python tool for transcribing videos and audio files with speaker diarization. 
 ## Current State
 
 - Core transcription flow is shared across CLI and server through `src/service.py`
-- Test suite is green on a fresh checkout: `91 passed`
+- Test suite is green on a fresh checkout: `208 passed`
 - A simple browser UI is available from the local model server for drag-and-drop uploads
 - Output files are written to `transcripts/`
 
 ## Features
 
-- Support for both video and audio files
-- Direct WAV file processing (no conversion needed)
-- Video to audio extraction
-- Speech-to-text transcription using Whisper
-- Speaker diarization
-- Multiple output formats (txt, pretty, srt, vtt, json)
-- Progress tracking and timeout handling
+- Support for both video and audio files (WAV processed directly, other formats converted)
+- Two ASR engines: Parakeet via `parakeet-mlx` (default on Apple Silicon) and Whisper via `faster-whisper` (default everywhere else)
+- Speaker diarization via pyannote.audio
+- Multiple output formats: txt, pretty, srt, vtt, vtt-voice, json, json3
+- Streaming transcription for large files with minimal memory usage
+- Batch processing of multiple files
+- Caching of audio extraction, transcription, and diarization results
+- Progress reporting (human-readable or machine-readable JSONL events)
+- Model server with browser UI for drag-and-drop uploads
 - Hardware acceleration support (CUDA, MPS)
-- Optimized parameters for different model sizes
-- **NEW: Modular architecture for better maintainability**
-- **NEW: Caching system for improved performance**
-- **Streaming Transcription**: Process large files with minimal memory usage
-- **Speaker Diarization**: Identify different speakers in the audio
-- **Multiple Output Formats**: Support for TXT, SRT, VTT, and JSON formats
-- **Configurable**: Extensive configuration options via environment variables or .env file
-- **Docker Support**: Containerized deployment
-- **AWS Deployment**: Ready for cloud deployment on AWS
+- Configurable via environment variables or `.env` file
+- Docker support and an AWS deployment guide
 
 ## Architecture
 
@@ -36,13 +31,17 @@ The project has been restructured into a modular architecture:
 ```
 whisperbox/
 ├── src/
-│   ├── audio/         # Audio processing components
-│   ├── transcription/ # Transcription engine
+│   ├── audio/         # Audio extraction, conversion, validation
+│   ├── transcription/ # ASR engines (Whisper, Parakeet) and streaming
 │   ├── diarization/   # Speaker diarization
 │   ├── output/        # Output formatting
 │   ├── cache/         # Caching system
+│   ├── utils/         # Progress reporting, resource monitoring
 │   ├── config.py      # Configuration handling
+│   ├── service.py     # High-level service facade (shared by CLI and server)
 │   ├── transcriber.py # Main orchestrator
+├── scripts/           # CLI entry points and model server
+├── web/               # Browser UI served by the model server
 ├── tests/
 │   ├── unit/          # Unit tests
 │   ├── integration/   # Integration tests
@@ -51,8 +50,9 @@ whisperbox/
 
 ### Key Components
 
-- **AudioProcessor**: Handles audio extraction and processing
-- **TranscriptionEngine**: Manages speech-to-text transcription
+- **TranscriptionService**: High-level facade used by both the CLI and the model server
+- **Transcriber**: Orchestrates audio processing, transcription, diarization, and output
+- **WhisperEngine / ParakeetEngine**: ASR engines selected via `make_asr_engine(config)`
 - **DiarizationEngine**: Handles speaker identification
 - **OutputFormatter**: Formats transcripts in various output formats
 - **CacheManager**: Manages caching of audio, transcription, and diarization results
@@ -84,6 +84,9 @@ MAX_CACHE_SIZE=10737418240  # Maximum cache size in bytes (default: 10GB)
 - `pretty`: Readable text format with merged same-speaker paragraphs
 - `srt`: SubRip subtitle format with timestamps
 - `vtt`: WebVTT format for web video subtitles
+- `vtt-voice`: WebVTT with `<v Speaker>` voice tags
+- `json`: Structured segments with timestamps and speakers
+- `json3`: YouTube auto-caption wire format (consumable by yt-dlp)
 
 ## Whisper Models
 
@@ -96,20 +99,7 @@ The system supports different Whisper model sizes, each with its own trade-offs:
 | small | ~500MB | Medium | Moderate | Better | Professional use |
 | medium | ~1.5GB | High | Slower | Very Good | Complex audio |
 | large-v3 | ~3GB | Very High | Slowest | Best | Critical accuracy needs |
-
-### Model-Specific Optimizations
-
-- **Base Model**: Optimized for general use with balanced parameters
-  - Default VAD settings
-  - Standard beam size (5)
-  - Good for most use cases
-
-- **Medium/Large Models**: Enhanced parameters for better accuracy
-  - Increased beam size (6)
-  - Adjusted VAD parameters for better word boundary detection
-  - Added speech padding to prevent word cutting
-  - Context-aware processing with previous text conditioning
-  - Optimized for conversation transcription
+| large-v3-turbo | ~1.6GB | High | Fast | Very Good | Default — near large-v3 accuracy at much higher speed |
 
 Choose your model in the `.env` file:
 ```bash
@@ -118,9 +108,9 @@ WHISPER_MODEL=large-v3-turbo  # Common options: tiny, base, small, medium, large
 
 ## Requirements
 
-- Python 3.8+
+- Python 3.10+ (developed on 3.13; Docker image uses 3.12)
 - FFmpeg (for video/audio processing)
-- PyTorch
+- PyTorch — not in `requirements.txt`; installed separately via `make install-torch` (CPU wheels) or your own CUDA build
 - Other dependencies listed in requirements.txt
 
 ## Installation
@@ -129,7 +119,7 @@ WHISPER_MODEL=large-v3-turbo  # Common options: tiny, base, small, medium, large
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/yourusername/whisperbox.git
+git clone https://github.com/Jimbo1167/whisperbox.git
 cd whisperbox
 ```
 
@@ -153,7 +143,7 @@ cp .env.example .env
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/yourusername/whisperbox.git
+git clone https://github.com/Jimbo1167/whisperbox.git
 cd whisperbox
 ```
 
@@ -170,12 +160,15 @@ make docker-run
 Edit the `.env` file to configure:
 
 - `HF_TOKEN`: Your HuggingFace token for accessing models
-- `TRANSCRIPTION_ENGINE`: ASR engine to use (`whisper` or `parakeet`, default `whisper`). See [Transcription engines](#transcription-engines) below.
-- `WHISPER_MODEL`: Whisper model size (tiny, base, small, medium, large)
+- `TRANSCRIPTION_ENGINE`: ASR engine to use (`whisper` or `parakeet`; default `parakeet` on Apple Silicon, `whisper` elsewhere). See [Transcription engines](#transcription-engines) below.
+- `WHISPER_MODEL`: Whisper model size (tiny, base, small, medium, large-v2, large-v3, large-v3-turbo; default: large-v3-turbo)
+- `WHISPER_BEAM_SIZE`, `WHISPER_CPU_THREADS`, `WHISPER_BATCH_SIZE`: Whisper speed/accuracy tuning (see `.env.example`)
 - `PARAKEET_MODEL`: HF model id or local path to MLX-format weights (default `mlx-community/parakeet-tdt-0.6b-v3`). Only used when `TRANSCRIPTION_ENGINE=parakeet`.
 - `LANGUAGE`: Target language for transcription (default: en)
-- `OUTPUT_FORMAT`: Transcript format (txt, pretty, srt, vtt, json)
-- `INCLUDE_DIARIZATION`: Enable/disable speaker diarization
+- `OUTPUT_FORMAT`: Transcript format (txt, pretty, srt, vtt, vtt-voice, json, json3)
+- `INCLUDE_DIARIZATION`: Enable/disable speaker diarization (default: false)
+- `DIARIZATION_MODEL`: pyannote model id (default: pyannote/speaker-diarization-community-1)
+- `FORCE_CPU`: Force CPU for Whisper even when a GPU is available (default: false)
 - `CACHE_ENABLED`: Enable/disable caching system
 - `CACHE_EXPIRATION`: Cache expiration time in seconds
 - `MAX_CACHE_SIZE`: Maximum cache size in bytes
@@ -183,20 +176,22 @@ Edit the `.env` file to configure:
 
 ## Transcription engines
 
-Two ASR engines are selectable via `TRANSCRIPTION_ENGINE`:
+Two ASR engines are selectable via `TRANSCRIPTION_ENGINE`. When it is unset, the
+default is `parakeet` on Apple Silicon (falling back to `whisper` if `parakeet-mlx`
+isn't installed) and `whisper` everywhere else.
 
-### `whisper` (default)
+### `whisper` (default off Apple Silicon)
 
 `faster-whisper` running `large-v3-turbo` by default. Works on macOS, Linux, and Docker. Supports 99+ languages. Streaming and async streaming are supported.
 
-### `parakeet` (Apple Silicon only)
+### `parakeet` (Apple Silicon only, default there)
 
 NVIDIA Parakeet-TDT-0.6B-v3 via [`parakeet-mlx`](https://github.com/senstella/parakeet-mlx). On macOS arm64, this is roughly an order of magnitude faster than Whisper on CPU and produces lower WER on the Open ASR Leaderboard for English / ~25 European languages. Batch only — no streaming.
 
-Enable:
+To force Whisper on Apple Silicon instead:
 
 ```bash
-export TRANSCRIPTION_ENGINE=parakeet
+export TRANSCRIPTION_ENGINE=whisper
 ```
 
 #### First-run model download
@@ -232,9 +227,9 @@ Process an audio file (WAV files are processed directly):
 python -m scripts.transcribe transcribe path/to/your/audio.wav
 ```
 
-Disable diarization for a one-off run:
+Enable diarization for a one-off run (off by default; the `--diarize` flag is opt-in — to force it off for every run, set `INCLUDE_DIARIZATION=false` in `.env`):
 ```bash
-python -m scripts.transcribe transcribe path/to/your/audio.wav --no-diarize
+python -m scripts.transcribe transcribe path/to/your/audio.wav --diarize
 ```
 
 ### Web UI
@@ -336,10 +331,7 @@ python -m pytest tests/
 - Large video files may require significant memory
 - Some hardware acceleration features require specific hardware/drivers
 - Non-WAV audio files will be converted to WAV before processing
-- You may see warnings about pyannote.audio and PyTorch version mismatches. Options to address this:
-  - Use a newer diarization model: Set `DIARIZATION_MODEL=pyannote/speaker-diarization@2.1.1` in your `.env` file
-  - Downgrade libraries: `pip install pyannote.audio==0.0.1 torch==1.10.0`
-  - Ignore the warnings if diarization is working correctly
+- Diarization requires a HuggingFace token (`HF_TOKEN`) with access to the pyannote model set in `DIARIZATION_MODEL`
 
 ## Contributing
 
