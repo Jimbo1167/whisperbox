@@ -150,14 +150,33 @@ Get the audio path and whether it needs cleanup.
 
 ## Transcription Engine
 
-The `TranscriptionEngine` class manages speech-to-text transcription.
+Speech-to-text is handled by ASR engine classes that implement the `ASREngine`
+protocol. Two engines exist: `WhisperEngine` (faster-whisper) and
+`ParakeetEngine` (parakeet-mlx, Apple Silicon only). Use the factory to pick the
+engine configured via `TRANSCRIPTION_ENGINE` (default: parakeet on Apple Silicon,
+whisper elsewhere):
 
-### Class: `TranscriptionEngine`
+### Factory: `make_asr_engine`
 
 ```python
-from src.transcription.engine import TranscriptionEngine
+from src.transcription.engine import make_asr_engine
 
-transcription_engine = TranscriptionEngine(config, test_mode=False)
+engine = make_asr_engine(config)
+```
+
+#### Parameters
+
+- `config` (Config): Configuration object (`config.transcription_engine` selects the engine)
+
+**Returns:**
+- An `ASREngine` instance (`WhisperEngine` or `ParakeetEngine`)
+
+### Classes: `WhisperEngine`, `ParakeetEngine`
+
+```python
+from src.transcription.engine import WhisperEngine, ParakeetEngine
+
+engine = WhisperEngine(config, test_mode=False)
 ```
 
 #### Parameters
@@ -170,7 +189,7 @@ transcription_engine = TranscriptionEngine(config, test_mode=False)
 ##### `transcribe`
 
 ```python
-segments = transcription_engine.transcribe(audio_path)
+segments = engine.transcribe(audio_path)
 ```
 
 Transcribe an audio file with timeout.
@@ -184,11 +203,12 @@ Transcribe an audio file with timeout.
 ##### `transcribe_stream`
 
 ```python
-for segment in transcription_engine.transcribe_stream(audio_path):
+for segment in engine.transcribe_stream(audio_path):
     # Process segment
 ```
 
-Transcribe an audio file in streaming mode to reduce memory usage.
+Transcribe an audio file in streaming mode to reduce memory usage. Whisper only —
+`ParakeetEngine` raises `NotImplementedError` for streaming entry points.
 
 **Parameters:**
 - `audio_path` (str): Path to the audio file
@@ -511,16 +531,17 @@ config = Config()
 #### Properties
 
 - `hf_token` (str): HuggingFace token for accessing models
-- `whisper_model_size` (str): Whisper model size (tiny, base, small, medium, large-v3)
+- `transcription_engine` (str): ASR engine to use (`whisper` or `parakeet`)
+- `whisper_model_size` (str): Whisper model size (tiny, base, small, medium, large-v2, large-v3, large-v3-turbo)
+- `parakeet_model` (str): HF model id or local path to MLX-format Parakeet weights
 - `diarization_model` (str): Diarization model to use
 - `language` (str): Target language for transcription
-- `output_format` (str): Transcript format (txt, srt, vtt, json)
+- `output_format` (str): Transcript format (txt, srt, vtt, vtt-voice, json, json3, pretty)
 - `include_diarization` (bool): Whether to include speaker diarization
+- `force_cpu` (bool): Force CPU for Whisper even when a GPU is available
 - `cache_enabled` (bool): Whether to enable caching
 - `cache_expiration` (int): Cache expiration time in seconds
 - `max_cache_size` (int): Maximum cache size in bytes
-- `audio_timeout` (int): Timeout for audio extraction in seconds
-- `transcribe_timeout` (int): Timeout for transcription in seconds
-- `diarize_timeout` (int): Timeout for diarization in seconds
-- `model_server_host` (str): Host for the model server
-- `model_server_port` (int): Port for the model server 
+- `audio_timeout` (int): Timeout for audio extraction in seconds (default: 300)
+- `transcribe_timeout` (int): Timeout for transcription in seconds (default: 3600)
+- `diarize_timeout` (int): Timeout for diarization in seconds (default: 3600) 

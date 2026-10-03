@@ -131,21 +131,21 @@ for task, task_summary in summary.items():
 
 ## Progress Callback for Libraries
 
-If you're working with a library that supports callbacks, you can use the `create_callback_progress` function:
+If you're working with a library that reports progress as `(completed, status)`, you can adapt it to your own handler with `create_callback_progress`:
 
 ```python
 from src.utils.progress import create_callback_progress
 import time
 
-def process_with_callback(callback, total):
-    for i in range(total):
-        time.sleep(0.1)
-        if callback:
-            callback(1, {"item": i, "status": "processing"})
+def on_progress(completed, total, status):
+    print(f"{completed}/{total} {status or ''}")
 
-# Create a progress reporter with a callback
-with create_callback_progress(total=100, description="Processing with callback") as callback:
-    process_with_callback(callback, 100)
+# Wraps on_progress, filling in the fixed total
+callback = create_callback_progress(on_progress, total=100, desc="Processing with callback")
+
+for i in range(100):
+    time.sleep(0.1)
+    callback(i + 1, "processing")
 ```
 
 ## Resource Usage Monitoring

@@ -6,12 +6,22 @@ This guide provides detailed information about the Whisperbox command-line inter
 
 The Whisperbox provides several command-line scripts for different use cases:
 
-1. `transcribe.py` - Unified CLI with subcommands for transcription
-2. `model_server.py` - Server for persistent model instances
-3. `model_client.py` - Client for interacting with the model server
-4. `batch_transcribe.py` - Process multiple files in batch
-5. `stream_transcribe.py` - Process files in streaming mode
-6. `transcribe_video.py` - Legacy script for basic transcription
+1. `scripts/transcribe.py` - Unified CLI with subcommands for transcription (recommended)
+2. `scripts/model_server.py` - Server for persistent model instances (also serves the web UI)
+3. `scripts/model_client.py` - Client for interacting with the model server
+4. `scripts/batch_transcribe.py` - Process multiple files in batch
+5. `scripts/stream_transcribe.py` - Process files in streaming mode
+6. `scripts/benchmark.py` - Accuracy benchmarking against a reference transcript
+7. `transcribe_video.py` (repo root) - Minimal legacy script; all options come from `.env`
+
+Unless a different set is noted below, subcommands share these option values:
+
+- Output formats: `txt`, `srt`, `vtt`, `vtt-voice`, `json`, `json3`, `pretty`
+- Model sizes: `tiny`, `base`, `small`, `medium`, `large`
+- When `--model` is omitted, the `WHISPER_MODEL` setting from `.env` is used
+  (default `large-v3-turbo`)
+- `--diarize` is an opt-in flag; there is no `--no-diarize`. To keep diarization
+  off, leave `INCLUDE_DIARIZATION=false` in `.env` and omit the flag.
 
 ## Unified CLI: `transcribe.py`
 
@@ -23,8 +33,9 @@ python -m scripts.transcribe [OPTIONS] COMMAND [ARGS]...
 
 ### Global Options
 
-- `--help`: Show help message and exit
 - `--version`: Show version information and exit
+- `--verbose, -v`: Enable verbose (DEBUG) logging
+- `--help, -h`: Show help message and exit
 
 ### Transcribe Command
 
@@ -36,11 +47,13 @@ python -m scripts.transcribe transcribe [OPTIONS] INPUT_PATH
 
 #### Options
 
-- `--output, -o TEXT`: Output file path
-- `--format, -f [txt|srt|vtt|json]`: Output format (default: txt)
-- `--model, -m [tiny|base|small|medium|large-v3]`: Whisper model size (default: base)
-- `--language, -l TEXT`: Language code (default: en)
-- `--diarize / --no-diarize`: Enable/disable speaker diarization (default: enabled)
+- `--output, -o PATH`: Output file path (default: `transcripts/<input name>.<format>`)
+- `--format, -f [txt|srt|vtt|vtt-voice|json|json3|pretty]`: Output format
+- `--model, -m [tiny|base|small|medium|large]`: Whisper model size
+- `--language, -l TEXT`: Language code (e.g., en, fr, de)
+- `--diarize, -d`: Include speaker diarization
+- `--progress [pretty|jsonl|none]`: Progress reporting mode (default: pretty).
+  `jsonl` emits one JSON event per line on stderr for programmatic callers.
 - `--help`: Show help message and exit
 
 #### Examples
@@ -55,14 +68,19 @@ Specify output format and location:
 python -m scripts.transcribe transcribe path/to/video.mp4 -f srt -o path/to/output.srt
 ```
 
-Disable speaker diarization:
+Enable speaker diarization:
 ```bash
-python -m scripts.transcribe transcribe path/to/video.mp4 --no-diarize
+python -m scripts.transcribe transcribe path/to/video.mp4 --diarize
 ```
 
 Use a different model:
 ```bash
 python -m scripts.transcribe transcribe path/to/video.mp4 -m medium
+```
+
+Machine-readable progress events:
+```bash
+python -m scripts.transcribe transcribe path/to/video.mp4 --progress jsonl 2> events.jsonl
 ```
 
 ### Stream Command
@@ -83,6 +101,7 @@ Streaming always uses the Whisper engine (Parakeet has no streaming mode), whate
 - `--diarize, -d`: Include speaker diarization
 - `--model, -m [tiny|base|small|medium|large]`: Whisper model size
 - `--language, -l TEXT`: Language code (e.g., en, fr, de)
+- `--help`: Show help message and exit
 
 #### Examples
 
@@ -93,7 +112,7 @@ python -m scripts.transcribe stream path/to/video.mp4
 
 Streaming with specific options:
 ```bash
-python -m scripts.transcribe stream path/to/video.mp4 -f vtt -m small
+python -m scripts.transcribe stream path/to/video.mp4 -f vtt -m small --diarize
 ```
 
 Word-level timestamps:
@@ -117,47 +136,84 @@ Each segment in the JSON then carries a `words` list with absolute times in seco
 
 ### Batch Command
 
-The `batch` command processes multiple files in batch.
+The `batch` command processes multiple files matching a glob pattern. Note that
+it takes a single quoted pattern, not a list of paths — quote the glob so your
+shell doesn't expand it.
 
 ```bash
-python -m scripts.transcribe batch [OPTIONS] INPUT_PATHS...
+python -m scripts.transcribe batch [OPTIONS] INPUT_PATTERN
 ```
 
 #### Options
 
-- `--output-dir, -o TEXT`: Output directory (default: transcripts)
-- `--format, -f [txt|srt|vtt|json]`: Output format (default: txt)
-- `--model, -m [tiny|base|small|medium|large-v3]`: Whisper model size (default: base)
-- `--language, -l TEXT`: Language code (default: en)
-- `--diarize / --no-diarize`: Enable/disable speaker diarization (default: enabled)
-- `--workers, -w INTEGER`: Number of worker processes (default: auto)
+- `--output-dir, -o PATH`: Output directory (default: transcripts)
+- `--format, -f [txt|srt|vtt|vtt-voice|json|json3|pretty]`: Output format
+- `--model, -m [tiny|base|small|medium|large]`: Whisper model size
+- `--language, -l TEXT`: Language code
+- `--diarize, -d`: Include speaker diarization
+- `--workers, -w INTEGER`: Number of worker processes (default: 0 = auto)
+- `--adaptive, -a`: Use an adaptive worker pool that adjusts to system load
+- `--streaming, -s`: Use streaming transcription (reduces memory usage)
 - `--help`: Show help message and exit
 
 #### Examples
 
-Process multiple files:
-```bash
-python -m scripts.transcribe batch path/to/video1.mp4 path/to/video2.mp4
-```
-
 Process all MP4 files in a directory:
 ```bash
-python -m scripts.transcribe batch path/to/directory/*.mp4
+python -m scripts.transcribe batch "path/to/directory/*.mp4"
 ```
 
 Specify output directory and format:
 ```bash
-python -m scripts.transcribe batch path/to/directory/*.mp4 -o path/to/output -f srt
+python -m scripts.transcribe batch "path/to/directory/*.mp4" -o path/to/output -f srt
 ```
 
 Limit the number of worker processes:
 ```bash
-python -m scripts.transcribe batch path/to/directory/*.mp4 -w 2
+python -m scripts.transcribe batch "path/to/directory/*.mp4" -w 2
+```
+
+### Server Command
+
+Starts the model server (equivalent to `python -m scripts.model_server`).
+
+```bash
+python -m scripts.transcribe server [OPTIONS]
+```
+
+#### Options
+
+- `--host TEXT`: Host to bind the server (default: localhost)
+- `--port, -p INTEGER`: Port to bind the server (default: 8000)
+- `--config, -c PATH`: Path to configuration file (default: .env)
+
+### Client Command
+
+Interacts with a running model server (equivalent to `python -m scripts.model_client`).
+
+```bash
+python -m scripts.transcribe client [--server URL] {status|transcribe} [ARGS]...
+```
+
+#### Examples
+
+```bash
+python -m scripts.transcribe client status
+python -m scripts.transcribe client transcribe audio.mp3
+```
+
+### Completion Command
+
+Generates a shell completion script for bash, zsh, or fish:
+
+```bash
+python -m scripts.transcribe completion
 ```
 
 ## Model Server: `model_server.py`
 
-The `model_server.py` script runs a persistent model server for faster processing.
+The `model_server.py` script runs a persistent model server for faster processing. It
+also serves the drag-and-drop web UI at the server root (`http://localhost:8000`).
 
 ```bash
 python -m scripts.model_server [OPTIONS]
@@ -178,65 +234,59 @@ Start the server with default settings:
 python -m scripts.model_server
 ```
 
-Start the server with a specific port:
+Start the server on a specific port:
 ```bash
 python -m scripts.model_server --port 5001
 ```
 
-Start the server with verbose logging:
-```bash
-python -m scripts.model_server --verbose
-```
+### HTTP Endpoints
+
+- `GET /health` — liveness check
+- `GET /status`, `GET /api/status` — uptime, model info, stats
+- `POST /transcribe`, `POST /api/transcribe` — multipart upload (async job) or JSON `{"audio_path": ...}` for files already on the server
+- `GET /api/jobs/{id}` — poll an async job
+- `POST /api/transcribe-sync` — multipart upload, synchronous response
+- `GET /transcripts/{filename}` — download a finished transcript
+- `GET /` — browser UI
+
+Uploads are limited to 500 MB.
 
 ## Model Client: `model_client.py`
 
 The `model_client.py` script interacts with the model server.
 
 ```bash
-python -m scripts.model_client [OPTIONS] COMMAND [ARGS]...
+python -m scripts.model_client [--server URL] COMMAND [ARGS]...
 ```
 
-### Commands
+### Global Options
 
-- `status`: Check the server status
-- `transcribe`: Transcribe a file using the server
+- `--server, -s TEXT`: URL of the model server (default: http://localhost:8000)
 
 ### Status Command
 
-```bash
-python -m scripts.model_client status [OPTIONS]
-```
-
-#### Options
-
-- `--server-url TEXT`: URL of the model server (default: http://localhost:8000)
-- `--help`: Show help message and exit
-
-#### Examples
-
-Check the status of the default server:
 ```bash
 python -m scripts.model_client status
 ```
 
 Check the status of a specific server:
 ```bash
-python -m scripts.model_client status --server-url http://example.com:8000
+python -m scripts.model_client --server http://example.com:8000 status
 ```
 
 ### Transcribe Command
 
 ```bash
-python -m scripts.model_client transcribe [OPTIONS] INPUT_PATH
+python -m scripts.model_client transcribe [OPTIONS] FILE_PATH
 ```
 
 #### Options
 
-- `--server-url TEXT`: URL of the model server (default: http://localhost:8000)
 - `--output, -o TEXT`: Output file path
-- `--format, -f [txt|srt|vtt|json]`: Output format (default: txt)
-- `--language, -l TEXT`: Language code (default: en)
-- `--diarize / --no-diarize`: Enable/disable speaker diarization (default: enabled)
+- `--format, -f [txt|srt|vtt|json]`: Output format
+- `--model, -m TEXT`: Whisper model size
+- `--language, -l TEXT`: Language code
+- `--diarize, -d`: Include speaker diarization
 - `--help`: Show help message and exit
 
 #### Examples
@@ -253,42 +303,44 @@ python -m scripts.model_client transcribe path/to/video.mp4 -f srt -o path/to/ou
 
 Use a specific server:
 ```bash
-python -m scripts.model_client transcribe path/to/video.mp4 --server-url http://example.com:8000
+python -m scripts.model_client --server http://example.com:8000 transcribe path/to/video.mp4
 ```
 
 ## Batch Transcription: `batch_transcribe.py`
 
-The `batch_transcribe.py` script processes multiple files in batch.
+The `batch_transcribe.py` script processes multiple files matching a glob pattern.
+The `transcribe.py batch` subcommand delegates to it; use this script directly if
+you need the extra worker-pool options.
 
 ```bash
-python -m scripts.batch_transcribe [OPTIONS] INPUT_PATHS...
+python -m scripts.batch_transcribe [OPTIONS] INPUT_PATTERN
 ```
 
 ### Options
 
 - `--output-dir, -o TEXT`: Output directory (default: transcripts)
-- `--format, -f [txt|srt|vtt|json]`: Output format (default: txt)
-- `--model, -m [tiny|base|small|medium|large-v3]`: Whisper model size (default: base)
-- `--language, -l TEXT`: Language code (default: en)
-- `--diarize / --no-diarize`: Enable/disable speaker diarization (default: enabled)
-- `--workers, -w INTEGER`: Number of worker processes (default: auto)
+- `--format, -f [txt|srt|vtt|json]`: Output format
+- `--model, -m TEXT`: Whisper model size
+- `--language, -l TEXT`: Language code
+- `--diarize, -d`: Include speaker diarization
+- `--workers, -w INTEGER`: Number of worker processes (default: 0 = auto)
+- `--min-workers INTEGER`: Minimum workers for the adaptive pool (default: 1)
+- `--max-workers INTEGER`: Maximum workers for the adaptive pool (default: CPU count)
+- `--adaptive, -a`: Use an adaptive worker pool that adjusts to system load
+- `--streaming, -s`: Use streaming transcription
+- `--verbose, -v`: Enable verbose logging
 - `--help`: Show help message and exit
 
 ### Examples
 
-Process multiple files:
-```bash
-python -m scripts.batch_transcribe path/to/video1.mp4 path/to/video2.mp4
-```
-
 Process all MP4 files in a directory:
 ```bash
-python -m scripts.batch_transcribe path/to/directory/*.mp4
+python -m scripts.batch_transcribe "path/to/directory/*.mp4"
 ```
 
 Specify output directory and format:
 ```bash
-python -m scripts.batch_transcribe path/to/directory/*.mp4 -o path/to/output -f srt
+python -m scripts.batch_transcribe "path/to/directory/*.mp4" -o path/to/output -f srt
 ```
 
 ## Streaming Transcription: `stream_transcribe.py`
@@ -323,3 +375,48 @@ Word-level timestamps as JSON:
 ```bash
 python -m scripts.stream_transcribe interview.wav --words -f json -o interview.json
 ```
+
+Streaming with diarization:
+```bash
+python -m scripts.stream_transcribe path/to/video.mp4 --diarize
+```
+
+## Accuracy Benchmarking: `benchmark.py`
+
+The `benchmark.py` script runs the transcription pipeline against a YouTube video
+(comparing to its captions) or a local file with a reference transcript, and writes
+a WER report under `benchmarks/`. See `benchmarks/README.md` for details on
+interpreting the results. Requires the dev dependencies (`jiwer`, `yt-dlp`).
+
+```bash
+python -m scripts.benchmark [OPTIONS] URL_OR_PATH
+```
+
+### Options
+
+- `--engine [whisper|parakeet]`: ASR engine to benchmark (default: `TRANSCRIPTION_ENGINE`, else the platform default)
+- `--model TEXT`: Model override
+- `--reference TEXT`: Path to a reference transcript (instead of YouTube captions)
+- `--keep-files`: Keep downloaded audio/caption files
+
+### Examples
+
+```bash
+python -m scripts.benchmark "https://www.youtube.com/watch?v=<id>"
+python -m scripts.benchmark "<url>" --engine parakeet
+python -m scripts.benchmark path/to/audio.wav --reference path/to/truth.vtt
+```
+
+## Legacy Script: `transcribe_video.py`
+
+The root-level `transcribe_video.py` is the original minimal entry point. It only
+accepts an input path and optional `--output`; everything else (format, model,
+diarization) comes from `.env`.
+
+```bash
+python transcribe_video.py path/to/video.mp4 [-o output.txt]
+```
+
+A richer variant lives at `scripts/transcribe_video.py` (adds `--format` including
+`pretty`, `--model`, `--language`, `--no-diarization`, `--verbose`). Prefer the
+unified `scripts/transcribe.py` CLI for new usage.

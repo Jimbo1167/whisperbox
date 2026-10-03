@@ -3,7 +3,7 @@
 ## Core Features
 
 ### Transcription Improvements
-- [ ] Add support for batch processing multiple videos
+- [x] Add support for batch processing multiple videos (`scripts/transcribe.py batch`)
 - [ ] Implement real-time transcription for live video streams
 - [ ] Add support for custom Whisper model fine-tuning
 - [ ] Implement automatic language detection
@@ -20,7 +20,7 @@
 ### Performance Optimizations
 - [ ] Implement parallel processing for audio extraction
 - [ ] Add GPU memory optimization for longer videos
-- [ ] Implement streaming transcription to handle large files
+- [x] Implement streaming transcription to handle large files (`stream` command)
 - [ ] Add support for distributed processing
 - [ ] Optimize memory usage during diarization
 
@@ -28,15 +28,15 @@
 - [ ] Add JSON output format with confidence scores
 - [ ] Implement automatic subtitle generation for YouTube
 - [ ] Add support for custom timestamp formats
-- [ ] Implement word-level timestamps
+- [x] Implement word-level timestamps (`stream --words`)
 - [ ] Add support for EDL (Edit Decision List) format
 - [ ] Add support for TTML (Timed Text Markup Language)
 
 ## User Experience
 
 ### CLI Improvements
-- [ ] Add progress bars for all processing steps
-- [ ] Implement command-line arguments for all options
+- [x] Add progress bars for all processing steps
+- [x] Implement command-line arguments for all options (unified `scripts/transcribe.py` CLI)
 - [ ] Add interactive mode for configuration
 - [ ] Implement resume capability for interrupted processes
 - [ ] Add preview mode for quick sample transcription
@@ -49,7 +49,7 @@
 - [ ] Implement transcript editor with time alignment
 
 ### API Integration
-- [ ] Create REST API for remote transcription
+- [x] Create REST API for remote transcription (`scripts/model_server.py`)
 - [ ] Add WebSocket support for real-time updates
 - [ ] Implement cloud storage integration (S3, GCS)
 - [ ] Add support for video platform APIs (YouTube, Vimeo)
@@ -74,15 +74,15 @@
 ## Development Tools
 
 ### Testing
-- [ ] Add integration tests with real audio samples
+- [x] Add integration tests with real audio samples (tests/fixtures + tests/integration)
 - [ ] Implement performance benchmarking suite
-- [ ] Add automated accuracy testing
+- [x] Add automated accuracy testing (`scripts/benchmark.py`, see benchmarks/README.md)
 - [ ] Create test data generation tools
 - [ ] Implement CI/CD pipeline
 
 ### Documentation
-- [ ] Add API documentation
-- [ ] Create user guides for different use cases
+- [x] Add API documentation (docs/api/)
+- [x] Create user guides for different use cases (docs/user_guide/)
 - [ ] Add performance tuning guide
 - [ ] Create troubleshooting guide
 - [ ] Add architecture documentation
@@ -90,7 +90,7 @@
 ## Deployment
 
 ### Containerization
-- [ ] Create Docker container
+- [x] Create Docker container
 - [ ] Add Kubernetes deployment configurations
 - [ ] Implement container optimization for GPU support
 - [ ] Add multi-stage build process
@@ -106,7 +106,7 @@
 ## Research Areas
 
 ### AI/ML Improvements
-- [ ] Investigate newer speech recognition models
+- [x] Investigate newer speech recognition models (Parakeet engine added)
 - [ ] Research improved diarization techniques
 - [ ] Explore emotion detection in speech
 - [ ] Study accent recognition and adaptation
