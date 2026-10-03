@@ -203,3 +203,20 @@ def test_unsupported_format_raises_valueerror(tmp_path):
         assert "totally-made-up" in str(exc)
     else:
         raise AssertionError("expected ValueError for unknown format")
+
+
+def test_json_includes_words_only_when_rows_carry_them():
+    """`stream --words` appends a word list as a fifth row element."""
+    formatter = OutputFormatter(Config(output_format="json"))
+    words = [
+        {"start": 0.0, "end": 0.4, "word": " Hello"},
+        {"start": 0.4, "end": 0.9, "word": " world."},
+    ]
+
+    data = json.loads(formatter.format_transcript([
+        (0.0, 0.9, "Hello world.", "", words),
+        (1.0, 1.5, "Bye.", ""),
+    ]))
+
+    assert data[0]["words"] == words
+    assert "words" not in data[1]

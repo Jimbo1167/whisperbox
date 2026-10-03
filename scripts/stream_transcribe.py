@@ -31,8 +31,21 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
-def main():
-    """Main function for the streaming transcription script."""
+# Every format OutputFormatter can write; kept in sync with the Click CLI's
+# OUTPUT_FORMATS so `transcribe.py stream -f <fmt>` never trips argparse.
+OUTPUT_FORMATS = ["txt", "srt", "vtt", "vtt-voice", "json", "json3", "pretty"]
+
+
+def main(argv=None):
+    """Main function for the streaming transcription script.
+
+    Args:
+        argv: Argument list (defaults to sys.argv[1:]). The Click CLI in
+            scripts/transcribe.py calls this with an explicit list.
+
+    Returns:
+        Process exit code (0 on success).
+    """
     parser = argparse.ArgumentParser(
         description="Transcribe audio or video files using streaming to reduce memory usage"
     )
@@ -43,7 +56,8 @@ def main():
     )
     
     parser.add_argument(
-        "--output-path", "-o",
+        "--output", "--output-path", "-o",
+        dest="output_path",
         help="Path to save the transcript (default: input_file_name.txt)"
     )
     
@@ -51,6 +65,12 @@ def main():
         "--diarize", "-d",
         action="store_true",
         help="Include speaker diarization"
+    )
+
+    parser.add_argument(
+        "--words", "-w",
+        action="store_true",
+        help="Include word-level timestamps (JSON output only)"
     )
     
     parser.add_argument(
@@ -65,7 +85,7 @@ def main():
     
     parser.add_argument(
         "--format", "-f",
-        choices=["txt", "srt", "vtt", "json"],
+        choices=OUTPUT_FORMATS,
         help="Output format (default: txt)"
     )
     
@@ -75,7 +95,7 @@ def main():
         help="Enable verbose logging"
     )
     
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     
     # Set up logging level
     if args.verbose:
@@ -96,8 +116,19 @@ def main():
         config_kwargs['output_format'] = args.format
     if args.diarize:
         config_kwargs['include_diarization'] = True
-    
+    # Streaming is Whisper-only (Transcriber.transcribe_stream raises for any
+    # other engine), and Parakeet is the platform default on Apple Silicon.
+    config_kwargs['transcription_engine'] = 'whisper'
+
     config = Config(**config_kwargs)
+
+    # Only the JSON formatter has a place for per-word timing; skip the extra
+    # alignment work when the words would be dropped anyway.
+    word_timestamps = args.words and config.output_format == "json"
+    if args.words and not word_timestamps:
+        logger.warning(
+            f"--words only applies to json output; ignoring it for {config.output_format}"
+        )
     
     # Generate output path if not specified
     if not args.output_path:
@@ -114,6 +145,7 @@ def main():
     logger.info(f"Processing {args.input_path} using streaming transcription...")
     logger.info(f"Model: {config.whisper_model_size}, Language: {config.language or 'auto'}")
     logger.info(f"Diarization: {'Enabled' if config.include_diarization else 'Disabled'}")
+    logger.info(f"Word timestamps: {'Enabled' if word_timestamps else 'Disabled'}")
     
     start_time = time.time()
     segments = []
@@ -129,12 +161,11 @@ def main():
         with progress:
             # Use streaming transcription with diarization
             if config.include_diarization:
-                for segment in transcriber.transcribe_stream_with_diarization(args.input_path):
-                    segments.append((
-                        segment['start'],
-                        segment['end'],
-                        segment['text'],
-                        segment.get('speaker', 'SPEAKER')
+                for segment in transcriber.transcribe_stream_with_diarization(
+                    args.input_path, word_timestamps=word_timestamps
+                ):
+                    segments.append(_to_row(
+                        segment, segment.get('speaker', 'SPEAKER'), word_timestamps
                     ))
                     
                     # Update progress
@@ -146,13 +177,10 @@ def main():
                     )
             else:
                 # Use streaming transcription without diarization
-                for segment in transcriber.transcribe_stream(args.input_path):
-                    segments.append((
-                        segment['start'],
-                        segment['end'],
-                        segment['text'],
-                        "SPEAKER"
-                    ))
+                for segment in transcriber.transcribe_stream(
+                    args.input_path, word_timestamps=word_timestamps
+                ):
+                    segments.append(_to_row(segment, "SPEAKER", word_timestamps))
                     
                     # Update progress
                     progress.update(1, f"Segment {len(segments)}")
@@ -198,6 +226,19 @@ def main():
         logger.info(f"  GPU Memory: {resource_summary['gpu_memory_used_gb']:.2f} GB")
     
     return 0
+
+
+def _to_row(segment, speaker, word_timestamps):
+    """Convert a streamed segment dict to an OutputFormatter row.
+
+    Rows are (start, end, text, speaker), plus the word list as a fifth
+    element when word timestamps were requested (JSON output only).
+    """
+    row = (segment['start'], segment['end'], segment['text'], speaker)
+    if word_timestamps:
+        row += (segment.get('words', []),)
+    return row
+
 
 if __name__ == "__main__":
     sys.exit(main()) 

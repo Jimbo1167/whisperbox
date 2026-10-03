@@ -255,7 +255,13 @@ For large files or systems with limited memory, use the streaming transcription:
 python -m scripts.stream_transcribe path/to/video.mp4
 ```
 
-This processes the audio in chunks, significantly reducing memory usage.
+This processes the audio in chunks, significantly reducing memory usage. Streaming always uses the Whisper engine.
+
+For word-level timestamps, add `--words` with JSON output:
+
+```bash
+python -m scripts.stream_transcribe path/to/audio.wav --words -f json -o transcript.json
+```
 
 ### With Speaker Diarization
 

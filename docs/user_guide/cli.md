@@ -73,9 +73,16 @@ The `stream` command processes a file in streaming mode to reduce memory usage.
 python -m scripts.transcribe stream [OPTIONS] INPUT_PATH
 ```
 
+Streaming always uses the Whisper engine (Parakeet has no streaming mode), whatever `TRANSCRIPTION_ENGINE` is set to.
+
 #### Options
 
-Same as the `transcribe` command.
+- `--output, -o PATH`: Output file path
+- `--format, -f [txt|srt|vtt|vtt-voice|json|json3|pretty]`: Output format
+- `--words, -w`: Add word-level timestamps to each segment (JSON output only; ignored with a warning for other formats)
+- `--diarize, -d`: Include speaker diarization
+- `--model, -m [tiny|base|small|medium|large]`: Whisper model size
+- `--language, -l TEXT`: Language code (e.g., en, fr, de)
 
 #### Examples
 
@@ -86,7 +93,26 @@ python -m scripts.transcribe stream path/to/video.mp4
 
 Streaming with specific options:
 ```bash
-python -m scripts.transcribe stream path/to/video.mp4 -f vtt -m small --no-diarize
+python -m scripts.transcribe stream path/to/video.mp4 -f vtt -m small
+```
+
+Word-level timestamps:
+```bash
+python -m scripts.transcribe stream interview.wav --words -f json -o interview.json
+```
+
+Each segment in the JSON then carries a `words` list with absolute times in seconds:
+```json
+{
+  "start": 0.0,
+  "end": 2.66,
+  "text": "the quick brown fox jumps over the lazy dog.",
+  "speaker": "SPEAKER",
+  "words": [
+    {"start": 0.0, "end": 0.12, "word": " the"},
+    {"start": 0.12, "end": 0.38, "word": " quick"}
+  ]
+}
 ```
 
 ### Batch Command
@@ -273,16 +299,27 @@ The `stream_transcribe.py` script processes a file in streaming mode to reduce m
 python -m scripts.stream_transcribe [OPTIONS] INPUT_PATH
 ```
 
+It takes the same options as the `stream` command above (which calls it), and always uses the Whisper engine. Defaults for the model, language, format and diarization come from `.env` (`WHISPER_MODEL`, `LANGUAGE`, `OUTPUT_FORMAT`, `INCLUDE_DIARIZATION`).
+
 ### Options
 
-- `--output, -o TEXT`: Output file path
-- `--format, -f [txt|srt|vtt|json]`: Output format (default: txt)
-- `--model, -m [tiny|base|small|medium|large-v3]`: Whisper model size (default: base)
-- `--language, -l TEXT`: Language code (default: en)
-- `--diarize / --no-diarize`: Enable/disable speaker diarization (default: enabled)
+- `--output, --output-path, -o TEXT`: Output file path (default: next to the input, with the format's extension)
+- `--format, -f [txt|srt|vtt|vtt-voice|json|json3|pretty]`: Output format
+- `--words, -w`: Add word-level timestamps to each segment (JSON output only)
+- `--diarize, -d`: Include speaker diarization
+- `--model, -m TEXT`: Whisper model size
+- `--language, -l TEXT`: Language code
+- `--verbose, -v`: Enable verbose logging
 - `--help`: Show help message and exit
 
 ### Examples
 
 Basic streaming transcription:
+```bash
+python -m scripts.stream_transcribe path/to/video.mp4
+```
+
+Word-level timestamps as JSON:
+```bash
+python -m scripts.stream_transcribe interview.wav --words -f json -o interview.json
 ```

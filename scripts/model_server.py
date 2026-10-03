@@ -547,8 +547,13 @@ def run_server(host: str, port: int):
         httpd.server_close()
 
 
-def main():
-    """Main function."""
+def main(argv=None):
+    """Main function.
+
+    Args:
+        argv: Argument list (defaults to sys.argv[1:]). The Click CLI in
+            scripts/transcribe.py calls this with an explicit list.
+    """
     parser = argparse.ArgumentParser(
         description="Run a model server for persistent Whisper model instances"
     )
@@ -561,7 +566,7 @@ def main():
     parser.add_argument("--verbose", "-v", action="store_true",
                        help="Enable verbose logging")
 
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     # Configure logging
     if args.verbose:

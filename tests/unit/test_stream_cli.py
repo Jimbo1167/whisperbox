@@ -1,0 +1,162 @@
+"""Click CLI → script call contracts in scripts/transcribe.py.
+
+Regression: `transcribe.py stream ... --words` crashed with
+"TypeError: main() takes 0 positional arguments but 1 was given" because the
+Click subcommand passed an argv list to a main() that took none (and used
+flags the stream script didn't define). `server` had the same bug.
+"""
+
+from __future__ import annotations
+
+import json
+import sys
+import wave
+from pathlib import Path
+
+import numpy as np
+import pytest
+from click.testing import CliRunner
+
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(_REPO_ROOT))
+
+import scripts.model_server as model_server  # noqa: E402
+import scripts.stream_transcribe as stream_transcribe  # noqa: E402
+from scripts.transcribe import cli  # noqa: E402
+
+
+class FakeTranscriber:
+    """Stands in for src.transcriber.Transcriber inside stream_transcribe."""
+
+    instances: list["FakeTranscriber"] = []
+    error: Exception | None = None
+
+    def __init__(self, config):
+        self.config = config
+        self.stream_kwargs = None
+        type(self).instances.append(self)
+
+    def _segments(self, word_timestamps):
+        if type(self).error is not None:
+            raise type(self).error
+        words = (
+            [
+                {"start": 0.0, "end": 0.4, "word": " Hello"},
+                {"start": 0.4, "end": 0.9, "word": " world."},
+            ]
+            if word_timestamps
+            else []
+        )
+        yield {"start": 0.0, "end": 0.9, "text": "Hello world.", "words": words}
+
+    def transcribe_stream(self, input_path, word_timestamps=False):
+        self.stream_kwargs = {"word_timestamps": word_timestamps}
+        yield from self._segments(word_timestamps)
+
+    def transcribe_stream_with_diarization(self, input_path, word_timestamps=False):
+        self.stream_kwargs = {"word_timestamps": word_timestamps}
+        for segment in self._segments(word_timestamps):
+            yield {**segment, "speaker": "SPEAKER_00"}
+
+    def save_transcript(self, segments, output_path):
+        from src.output.formatter import OutputFormatter
+
+        formatter = OutputFormatter(self.config)
+        formatter.save_transcript(segments, output_path)
+
+
+@pytest.fixture(autouse=True)
+def fake_transcriber(monkeypatch):
+    FakeTranscriber.instances = []
+    FakeTranscriber.error = None
+    monkeypatch.setattr(stream_transcribe, "Transcriber", FakeTranscriber)
+    # Keep the test independent of the developer's .env.
+    monkeypatch.setenv("INCLUDE_DIARIZATION", "false")
+    return FakeTranscriber
+
+
+@pytest.fixture
+def wav_path(tmp_path):
+    path = tmp_path / "clip.wav"
+    with wave.open(str(path), "wb") as f:
+        f.setnchannels(1)
+        f.setsampwidth(2)
+        f.setframerate(16000)
+        f.writeframes(np.zeros(16000, dtype=np.int16).tobytes())
+    return path
+
+
+def test_stream_words_json_writes_word_timestamps(wav_path, tmp_path):
+    out = tmp_path / "out.json"
+    result = CliRunner().invoke(
+        cli,
+        ["stream", str(wav_path), "--words", "-l", "en", "-f", "json", "-o", str(out)],
+    )
+
+    assert result.exit_code == 0, result.output
+    (transcriber,) = FakeTranscriber.instances
+    assert transcriber.stream_kwargs == {"word_timestamps": True}
+    # Streaming is Whisper-only; Parakeet is the Apple Silicon default.
+    assert transcriber.config.transcription_engine == "whisper"
+    assert transcriber.config.language == "en"
+
+    data = json.loads(out.read_text(encoding="utf-8"))
+    assert data[0]["text"] == "Hello world."
+    assert data[0]["words"] == [
+        {"start": 0.0, "end": 0.4, "word": " Hello"},
+        {"start": 0.4, "end": 0.9, "word": " world."},
+    ]
+
+
+def test_stream_without_words_omits_word_list(wav_path, tmp_path):
+    out = tmp_path / "out.json"
+    result = CliRunner().invoke(cli, ["stream", str(wav_path), "-f", "json", "-o", str(out)])
+
+    assert result.exit_code == 0, result.output
+    assert FakeTranscriber.instances[0].stream_kwargs == {"word_timestamps": False}
+    assert "words" not in json.loads(out.read_text(encoding="utf-8"))[0]
+
+
+def test_stream_words_ignored_for_non_json_format(wav_path, tmp_path):
+    out = tmp_path / "out.srt"
+    result = CliRunner().invoke(
+        cli, ["stream", str(wav_path), "--words", "-f", "srt", "-o", str(out)]
+    )
+
+    assert result.exit_code == 0, result.output
+    assert FakeTranscriber.instances[0].stream_kwargs == {"word_timestamps": False}
+    assert "Hello world." in out.read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("fmt", ["vtt-voice", "json3", "pretty"])
+def test_stream_accepts_every_cli_output_format(wav_path, tmp_path, fmt):
+    out = tmp_path / f"out.{fmt}"
+    result = CliRunner().invoke(cli, ["stream", str(wav_path), "-f", fmt, "-o", str(out)])
+
+    assert result.exit_code == 0, result.output
+    assert out.exists()
+
+
+def test_stream_failure_propagates_nonzero_exit(wav_path, tmp_path):
+    FakeTranscriber.error = RuntimeError("boom")
+    result = CliRunner().invoke(
+        cli, ["stream", str(wav_path), "-f", "json", "-o", str(tmp_path / "out.json")]
+    )
+
+    # A clean exit with the script's return code, not an uncaught crash.
+    assert result.exit_code == 1
+    assert isinstance(result.exception, SystemExit)
+
+
+def test_server_passes_args_to_model_server_main(monkeypatch):
+    calls = {}
+    monkeypatch.setattr(model_server, "initialize_models", lambda path: calls.update(config=path))
+    monkeypatch.setattr(
+        model_server, "run_server", lambda host, port: calls.update(host=host, port=port)
+    )
+
+    result = CliRunner().invoke(cli, ["server", "--port", "9123", "--config", "custom.env"])
+
+    assert result.exit_code == 0, result.output
+    assert calls == {"config": "custom.env", "host": "localhost", "port": 9123}
+

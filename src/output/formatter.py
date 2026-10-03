@@ -204,13 +204,19 @@ class OutputFormatter:
 
     def _format_json(self, segments: List[Tuple[float, float, str, str]]) -> str:
         json_data = []
-        for start, end, text, speaker in segments:
-            json_data.append({
+        for segment in segments:
+            start, end, text, speaker = segment[:4]
+            entry = {
                 "start": start,
                 "end": end,
                 "text": text,
                 "speaker": speaker
-            })
+            }
+            # Optional fifth element: word-level timestamps
+            # ([{"start", "end", "word"}, ...]), as emitted by `stream --words`.
+            if len(segment) > 4:
+                entry["words"] = segment[4]
+            json_data.append(entry)
         return json.dumps(json_data, ensure_ascii=False, indent=2)
 
     def _format_json3(self, segments: List[Tuple[float, float, str, str]]) -> str:
