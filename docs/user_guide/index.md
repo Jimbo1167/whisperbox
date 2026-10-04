@@ -41,7 +41,7 @@ Whisperbox is a powerful Python tool for transcribing videos and audio files wit
 ### Step 1: Clone the Repository
 
 ```bash
-git clone https://github.com/yourusername/whisperbox.git
+git clone https://github.com/Jimbo1167/whisperbox.git
 cd whisperbox
 ```
 
@@ -79,33 +79,37 @@ The Whisperbox can be configured using environment variables or a `.env` file. H
 
 - `HF_TOKEN`: Your HuggingFace token for accessing models
 - `LANGUAGE`: Target language for transcription (default: en)
-- `OUTPUT_FORMAT`: Transcript format (txt, srt, vtt, json)
+- `OUTPUT_FORMAT`: Transcript format (txt, srt, vtt, vtt-voice, json, json3, pretty)
 
 ### Model Settings
 
-- `WHISPER_MODEL`: Whisper model size (tiny, base, small, medium, large-v3)
-- `DIARIZATION_MODEL`: Diarization model to use (default: pyannote/speaker-diarization@2.1)
+- `TRANSCRIPTION_ENGINE`: ASR engine, `whisper` or `parakeet` (default: parakeet on Apple Silicon, whisper elsewhere; parakeet is Apple Silicon only)
+- `WHISPER_MODEL`: Whisper model size (tiny, base, small, medium, large-v2, large-v3, large-v3-turbo; default: large-v3-turbo)
+- `WHISPER_BEAM_SIZE`: Beam size (default: 5; 1 = greedy, ~2x faster)
+- `WHISPER_CPU_THREADS`: CPU threads for Whisper (default: 0 = ctranslate2's default of 4)
+- `WHISPER_BATCH_SIZE`: >0 enables batched (parallel chunk) decoding (default: 0 = sequential)
+- `PARAKEET_MODEL`: HF model id or local path to MLX weights (default: mlx-community/parakeet-tdt-0.6b-v3)
+- `DIARIZATION_MODEL`: Diarization model to use (default: pyannote/speaker-diarization-community-1)
+- `FORCE_CPU`: Force CPU for Whisper even when a GPU is available (default: false)
 
 ### Feature Toggles
 
-- `INCLUDE_DIARIZATION`: Enable/disable speaker diarization (true/false)
-- `CACHE_ENABLED`: Enable/disable caching system (true/false)
+- `INCLUDE_DIARIZATION`: Enable/disable speaker diarization (true/false, default: false)
+- `CACHE_ENABLED`: Enable/disable caching system (true/false, default: true)
 
 ### Caching Settings
 
-- `CACHE_EXPIRATION`: Cache expiration time in seconds (default: 7 days)
+- `CACHE_EXPIRATION`: Cache expiration time in seconds (default: 604800 = 7 days)
 - `MAX_CACHE_SIZE`: Maximum cache size in bytes (default: 10GB)
 
 ### Timeout Settings
 
-- `AUDIO_TIMEOUT`: Timeout for audio extraction in seconds
-- `TRANSCRIBE_TIMEOUT`: Timeout for transcription in seconds
-- `DIARIZE_TIMEOUT`: Timeout for diarization in seconds
+- `AUDIO_TIMEOUT`: Timeout for audio extraction in seconds (default: 300)
+- `TRANSCRIBE_TIMEOUT`: Timeout for transcription in seconds (default: 3600)
+- `DIARIZE_TIMEOUT`: Timeout for diarization in seconds (default: 3600)
 
-### Model Server Settings
-
-- `MODEL_SERVER_HOST`: Host for the model server (default: localhost)
-- `MODEL_SERVER_PORT`: Port for the model server (default: 5000)
+The model server's host and port are set with the `--host`/`--port` CLI flags,
+not environment variables (default: localhost:8000).
 
 ## Basic Usage
 
@@ -131,11 +135,13 @@ python -m scripts.transcribe transcribe path/to/your/video.mp4 --format srt
 python -m scripts.transcribe transcribe path/to/your/video.mp4 --output path/to/output.txt
 ```
 
-### Enabling/Disabling Speaker Diarization
+### Enabling Speaker Diarization
+
+Diarization is off by default. Enable it per run with the flag, or for every run
+with `INCLUDE_DIARIZATION=true` in `.env`:
 
 ```bash
-python -m scripts.transcribe transcribe path/to/your/video.mp4 --diarize  # Enable diarization
-python -m scripts.transcribe transcribe path/to/your/video.mp4 --no-diarize  # Disable diarization
+python -m scripts.transcribe transcribe path/to/your/video.mp4 --diarize
 ```
 
 ### Selecting a Different Whisper Model
@@ -158,16 +164,17 @@ This processes the audio in chunks, significantly reducing memory usage.
 
 ### Batch Processing Multiple Files
 
-Process multiple files at once:
+Process multiple files matching a glob pattern (quote the pattern — the command
+takes one pattern, not a list of paths):
 
 ```bash
-python -m scripts.transcribe batch path/to/directory/*.mp4
+python -m scripts.transcribe batch "path/to/directory/*.mp4"
 ```
 
 Or specify an output directory:
 
 ```bash
-python -m scripts.transcribe batch path/to/directory/*.mp4 --output-dir path/to/output
+python -m scripts.transcribe batch "path/to/directory/*.mp4" --output-dir path/to/output
 ```
 
 ### Using the Model Server
@@ -202,29 +209,30 @@ The Whisperbox provides a unified command-line interface with several subcommand
 ### Transcribe Command
 
 ```bash
-./scripts/transcribe.py transcribe [OPTIONS] INPUT_PATH
+python -m scripts.transcribe transcribe [OPTIONS] INPUT_PATH
 ```
 
 Options:
 - `--output, -o`: Output file path
-- `--format, -f`: Output format (txt, srt, vtt, json)
+- `--format, -f`: Output format (txt, srt, vtt, vtt-voice, json, json3, pretty)
 - `--model, -m`: Whisper model size
 - `--language, -l`: Language code
-- `--diarize/--no-diarize`: Enable/disable speaker diarization
+- `--diarize, -d`: Include speaker diarization
+- `--progress`: Progress mode (pretty, jsonl, none)
 
 ### Stream Command
 
 ```bash
-./scripts/transcribe.py stream [OPTIONS] INPUT_PATH
+python -m scripts.transcribe stream [OPTIONS] INPUT_PATH
 ```
 
 Options:
-- Same as transcribe command
+- Same as transcribe command, minus `--progress`, plus `--words, -w` for word-level timestamps
 
 ### Batch Command
 
 ```bash
-./scripts/transcribe.py batch [OPTIONS] INPUT_PATHS...
+python -m scripts.transcribe batch [OPTIONS] INPUT_PATTERN
 ```
 
 Options:
@@ -232,26 +240,31 @@ Options:
 - `--format, -f`: Output format
 - `--model, -m`: Whisper model size
 - `--language, -l`: Language code
-- `--diarize/--no-diarize`: Enable/disable speaker diarization
-- `--workers, -w`: Number of worker processes
+- `--diarize, -d`: Include speaker diarization
+- `--workers, -w`: Number of worker processes (0 = auto)
+- `--adaptive, -a`: Adaptive worker pool
+- `--streaming, -s`: Use streaming transcription
 
 ### Model Server Commands
 
 Start the server:
 ```bash
-./scripts/model_server.py start [OPTIONS]
+python -m scripts.model_server [OPTIONS]
 ```
 
 Options:
-- `--host`: Host to bind the server
-- `--port`: Port to bind the server
-- `--model`: Whisper model size
+- `--host`: Host to bind the server (default: localhost)
+- `--port, -p`: Port to bind the server (default: 8000)
+- `--config, -c`: Path to configuration file (default: .env)
+- `--verbose, -v`: Enable verbose logging
 
 Client commands:
 ```bash
-./scripts/model_client.py status
-./scripts/model_client.py transcribe [OPTIONS] INPUT_PATH
+python -m scripts.model_client status
+python -m scripts.model_client transcribe [OPTIONS] INPUT_PATH
 ```
+
+See the [CLI guide](cli.md) for the full option reference.
 
 ## Troubleshooting
 
@@ -292,22 +305,20 @@ Solutions:
 
 #### Diarization Errors
 
-Error: `ImportError: cannot import name 'Inference' from 'pyannote.audio'`
+Error: `Could not download pyannote pipeline` or HTTP 401/403 from HuggingFace
 
 Solutions:
-- Use a compatible version of pyannote.audio
-- Set `DIARIZATION_MODEL=pyannote/speaker-diarization@2.1.1` in your `.env` file
-- Downgrade libraries: `pip install pyannote.audio==0.0.1 torch==1.10.0`
+- Set a valid `HF_TOKEN` in your `.env` file
+- Accept the model's terms on its HuggingFace page for the model set in `DIARIZATION_MODEL` (default: pyannote/speaker-diarization-community-1)
 
 ### Logging
 
-The Whisperbox logs information to the console by default. You can adjust the logging level in your `.env` file:
+The Whisperbox logs information to the console by default. For detailed DEBUG
+logging, pass the `--verbose`/`-v` flag to any of the CLI scripts:
 
 ```bash
-LOG_LEVEL=DEBUG  # Options: DEBUG, INFO, WARNING, ERROR
+python -m scripts.transcribe --verbose transcribe path/to/video.mp4
 ```
-
-For more detailed logging, set the level to DEBUG.
 
 ## FAQ
 
@@ -328,19 +339,15 @@ For large files, use streaming transcription to reduce memory usage.
 
 ### How accurate is the transcription?
 
-Accuracy depends on the model size, audio quality, and language:
-- Tiny model: ~80% accuracy on clear English speech
-- Base model: ~85% accuracy
-- Small model: ~90% accuracy
-- Medium model: ~94% accuracy
-- Large model: ~96% accuracy
+Accuracy depends on the model size, engine, audio quality, and language. Larger
+Whisper models are more accurate but slower. You can measure accuracy on your own
+content with the benchmarking harness (`python -m scripts.benchmark`) — see
+`benchmarks/README.md` for how to run it and interpret the WER numbers.
 
 ### How accurate is the speaker diarization?
 
-Speaker diarization accuracy depends on audio quality and number of speakers:
-- 2-3 speakers: ~90% accuracy
-- 4-6 speakers: ~80% accuracy
-- 7+ speakers: accuracy decreases significantly
+Diarization quality depends on audio quality and the number of speakers; it
+degrades as speaker count grows and with overlapping speech.
 
 ### Can it transcribe languages other than English?
 

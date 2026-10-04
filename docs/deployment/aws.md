@@ -89,12 +89,13 @@ INCLUDE_DIARIZATION=false
 FORCE_CPU=true
 CACHE_ENABLED=true
 HF_TOKEN=your_token_here
-AWS_S3_BUCKET=whisperbox-files
 ```
 
 ## S3 Integration
 
-To use S3 for file storage instead of local storage, modify the application to:
+S3 integration is not currently implemented in the application — files are read
+from and written to the container's local filesystem. To use S3 for file storage
+instead, modify the application to:
 
 1. Upload files to S3 before processing
 2. Download files from S3 when needed
