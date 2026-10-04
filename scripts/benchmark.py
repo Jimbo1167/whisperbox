@@ -43,6 +43,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 from src.config import Config  # noqa: E402
 from src.service import TranscriptionService  # noqa: E402
+from src.transcription.engine import ParakeetEngine  # noqa: E402
 
 
 _VTT_TIMESTAMP_RE = re.compile(r"^\d{2}:\d{2}:\d{2}\.\d{3} -->")
@@ -167,14 +168,27 @@ def compute_metrics(reference: str, hypothesis: str) -> dict:
     }
 
 
-def run_pipeline(audio_path: Path, engine: str, model: str | None) -> Tuple[dict, float]:
-    if engine:
-        os.environ["TRANSCRIPTION_ENGINE"] = engine
+def build_service(engine: str | None, model: str | None) -> TranscriptionService:
     config_kwargs = {"include_diarization": False}
+    if engine:
+        config_kwargs["transcription_engine"] = engine
     if model:
         config_kwargs["whisper_model"] = model
-    config = Config(**config_kwargs)
-    service = TranscriptionService(config)
+    return TranscriptionService(Config(**config_kwargs))
+
+
+def active_engine_name(service: TranscriptionService) -> str:
+    """Name of the ASR engine the service will actually run.
+
+    Read from the constructed engine rather than the config, because a
+    defaulted parakeet selection silently falls back to whisper when
+    parakeet-mlx isn't installed.
+    """
+    asr_engine = service.transcriber.transcription_engine
+    return "parakeet" if isinstance(asr_engine, ParakeetEngine) else "whisper"
+
+
+def run_pipeline(service: TranscriptionService, audio_path: Path) -> Tuple[dict, float]:
     t0 = time.time()
     result = service.transcribe_file(str(audio_path))
     elapsed = time.time() - t0
@@ -188,7 +202,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("url", help="YouTube URL (or local file path if --reference is given)")
     parser.add_argument("--engine", default=None, choices=["whisper", "parakeet"],
-                        help="ASR engine override (defaults to TRANSCRIPTION_ENGINE env or whisper)")
+                        help="ASR engine override (defaults to TRANSCRIPTION_ENGINE env, else the "
+                             "platform default: parakeet on Apple Silicon, whisper elsewhere)")
     parser.add_argument("--model", default=None,
                         help="Override the whisper model size (e.g. tiny, base, large-v3-turbo)")
     parser.add_argument("--reference", default=None,
@@ -217,8 +232,10 @@ def main(argv: list[str] | None = None) -> int:
         audio_path, subs_path, video_id, meta = fetch_youtube(args.url, work_dir)
         print(f"      audio={audio_path.name}  subs={subs_path.name}  id={video_id}", file=sys.stderr)
 
-    print(f"[2/4] Running whisperbox pipeline (engine={args.engine or os.getenv('TRANSCRIPTION_ENGINE') or 'whisper'})", file=sys.stderr)
-    result, elapsed = run_pipeline(audio_path, args.engine, args.model)
+    service = build_service(args.engine, args.model)
+    engine = active_engine_name(service)
+    print(f"[2/4] Running whisperbox pipeline (engine={engine})", file=sys.stderr)
+    result, elapsed = run_pipeline(service, audio_path)
     print(f"      done in {elapsed:.1f}s  segments={len(result['segments'])}", file=sys.stderr)
 
     print(f"[3/4] Computing WER against reference", file=sys.stderr)
@@ -233,7 +250,7 @@ def main(argv: list[str] | None = None) -> int:
         "video_id": video_id,
         "video_title": meta.get("title"),
         "video_duration_s": meta.get("duration"),
-        "engine": args.engine or os.getenv("TRANSCRIPTION_ENGINE") or "whisper",
+        "engine": engine,
         "model": args.model or os.getenv("WHISPER_MODEL") or "default",
         "ref_source": (
             meta.get("ref_source") if not args.reference else f"file:{args.reference}"
