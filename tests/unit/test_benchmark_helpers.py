@@ -1,10 +1,13 @@
-"""Pure-function unit tests for scripts/benchmark.py helpers (no network)."""
+"""Unit tests for scripts/benchmark.py helpers and engine reporting (no network)."""
 
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
+import platform
 import sys
+import types
 from pathlib import Path
 
 import pytest
@@ -121,3 +124,55 @@ class TestComputeMetrics:
                     "insertions", "deletions", "reference_word_count",
                     "hypothesis_word_count"):
             assert key in out
+
+
+class TestReportedEngine:
+    """The engine label must name the engine that actually ran, not a guess
+    from argv/env — otherwise WER comparisons between engines are corrupted."""
+
+    @pytest.fixture
+    def run_benchmark(self, monkeypatch, tmp_path, capsys):
+        monkeypatch.chdir(tmp_path)  # main() writes benchmarks/ under cwd
+        audio = tmp_path / "clip.wav"
+        audio.write_bytes(b"")
+        ref = tmp_path / "clip.vtt"
+        ref.write_text("WEBVTT\n\n00:00:00.000 --> 00:00:01.000\nhello world\n")
+        monkeypatch.setattr(
+            benchmark.TranscriptionService,
+            "transcribe_file",
+            lambda self, *a, **kw: {"segments": [(0.0, 1.0, "hello world", None)]},
+        )
+
+        def run(*extra_args):
+            assert benchmark.main([str(audio), "--reference", str(ref), *extra_args]) == 0
+            out = capsys.readouterr()
+            return json.loads(out.out), out.err
+
+        return run
+
+    @pytest.fixture
+    def apple_silicon_default(self, monkeypatch):
+        monkeypatch.delenv("TRANSCRIPTION_ENGINE", raising=False)
+        monkeypatch.setattr(sys, "platform", "darwin")
+        monkeypatch.setattr(platform, "machine", lambda: "arm64")
+
+    def test_defaulted_parakeet_is_reported_as_parakeet(
+        self, monkeypatch, apple_silicon_default, run_benchmark
+    ):
+        # Make the parakeet-mlx import succeed regardless of the test venv.
+        monkeypatch.setitem(sys.modules, "parakeet_mlx", types.ModuleType("parakeet_mlx"))
+        report, progress = run_benchmark()
+        assert report["engine"] == "parakeet"
+        assert "engine=parakeet" in progress
+
+    def test_parakeet_fallback_is_reported_as_whisper(
+        self, monkeypatch, apple_silicon_default, run_benchmark
+    ):
+        monkeypatch.setitem(sys.modules, "parakeet_mlx", None)  # import raises
+        report, progress = run_benchmark()
+        assert report["engine"] == "whisper"
+        assert "engine=whisper" in progress
+
+    def test_explicit_engine_flag_is_reported(self, apple_silicon_default, run_benchmark):
+        report, _ = run_benchmark("--engine", "whisper")
+        assert report["engine"] == "whisper"
