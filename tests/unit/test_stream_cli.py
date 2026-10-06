@@ -160,3 +160,56 @@ def test_server_passes_args_to_model_server_main(monkeypatch):
     assert result.exit_code == 0, result.output
     assert calls == {"config": "custom.env", "host": "localhost", "port": 9123}
 
+
+
+class _Word:
+    def __init__(self, start, end, word):
+        self.start, self.end, self.word = start, end, word
+
+
+class _Segment:
+    def __init__(self, start, end, text, words):
+        self.start, self.end, self.text, self.words = start, end, text, words
+
+
+class _RecordingWhisper:
+    """Fake faster-whisper model: records its kwargs, honors word_timestamps."""
+
+    calls: list = []
+
+    def __init__(self, *args, **kwargs):
+        pass
+
+    def transcribe(self, audio, **kwargs):
+        type(self).calls.append(kwargs)
+        words = (
+            [_Word(0.0, 0.4, " Hello"), _Word(0.4, 0.9, " world.")]
+            if kwargs.get("word_timestamps") else []
+        )
+        return iter([_Segment(0.0, 0.9, "Hello world.", words)]), None
+
+
+def test_stream_words_reach_json_through_the_real_pipeline(wav_path, tmp_path, monkeypatch):
+    """--words through the real Transcriber, WhisperEngine and StreamingTranscriber.
+
+    The tests above fake the whole Transcriber, so dropping word_timestamps
+    anywhere between the CLI and faster-whisper went unnoticed.
+    """
+    import src.transcription.engine as engine_module
+    from src.transcriber import Transcriber
+
+    _RecordingWhisper.calls = []
+    monkeypatch.setattr(stream_transcribe, "Transcriber", Transcriber)
+    monkeypatch.setattr(engine_module, "WhisperModel", _RecordingWhisper)
+    monkeypatch.setenv("CACHE_ENABLED", "false")
+    out = tmp_path / "out.json"
+
+    result = CliRunner().invoke(
+        cli, ["stream", str(wav_path), "--words", "-f", "json", "-o", str(out)]
+    )
+
+    assert result.exit_code == 0, result.output
+    assert _RecordingWhisper.calls
+    assert all(call["word_timestamps"] is True for call in _RecordingWhisper.calls)
+    (segment,) = json.loads(out.read_text(encoding="utf-8"))
+    assert [w["word"] for w in segment["words"]] == [" Hello", " world."]

@@ -119,19 +119,46 @@ def test_transcribe_without_diarization(transcriber, mock_audio_processor,
     assert result[0][3] == ""  # No speaker information
     assert result[1][3] == ""  # No speaker information
 
-def test_save_transcript(transcriber, mock_output_formatter):
-    """Test save_transcript method."""
-    # Create test segments
+def test_save_transcript_writes_the_configured_format(mock_config, tmp_path):
+    """save_transcript writes the transcriber's output format with the real formatter."""
+    mock_config.output_format = "srt"
     segments = [
         (0.0, 2.0, "Test segment one", "SPEAKER_01"),
         (2.0, 4.0, "Test segment two", "SPEAKER_02")
     ]
-    
-    # Run the save_transcript method
-    transcriber.save_transcript(segments, "test.txt")
-    
-    # Check that the output formatter was called
-    mock_output_formatter.save_transcript.assert_called_once_with(segments, "test.txt")
+    out = tmp_path / "out.srt"
+
+    Transcriber(mock_config, test_mode=True).save_transcript(segments, str(out))
+
+    assert out.read_text(encoding="utf-8") == (
+        "1\n00:00:00,000 --> 00:00:02,000\nSPEAKER_01: Test segment one\n\n"
+        "2\n00:00:02,000 --> 00:00:04,000\nSPEAKER_02: Test segment two\n"
+    )
+
+
+class TestSpeakerAlignment:
+    """Diarization turns rarely line up with transcript segments exactly."""
+
+    def test_segment_takes_the_speaker_it_overlaps_most(self, transcriber):
+        # A talks for the first second, B for the remaining two.
+        diarization = [
+            {"start": 0.0, "end": 1.0, "speaker": "A"},
+            {"start": 1.0, "end": 3.0, "speaker": "B"},
+        ]
+        result = transcriber._combine_segments_with_speakers(
+            [{"start": 0.0, "end": 3.0, "text": "hi"}], diarization
+        )
+        assert result == [(0.0, 3.0, "hi", "B")]
+
+    def test_segment_in_a_gap_between_turns_has_no_speaker(self, transcriber):
+        diarization = [
+            {"start": 0.0, "end": 1.0, "speaker": "A"},
+            {"start": 5.0, "end": 6.0, "speaker": "B"},
+        ]
+        result = transcriber._combine_segments_with_speakers(
+            [{"start": 2.0, "end": 3.0, "text": "hi"}], diarization
+        )
+        assert result == [(2.0, 3.0, "hi", "")]
 
 def test_combine_segments_with_speakers(transcriber):
     """Test _combine_segments_with_speakers method."""

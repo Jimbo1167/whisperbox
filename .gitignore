@@ -52,6 +52,8 @@ transcript*.txt
 models/
 
 .pytest_cache/
+.coverage
+htmlcov/
 .env
 .DS_Store
 # Virtual environment

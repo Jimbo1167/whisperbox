@@ -65,10 +65,13 @@ def fake_server(config):
     FakeModelServer.last_post_payload = None
     port = _free_port()
     server = HTTPServer(("127.0.0.1", port), FakeModelServer)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread = threading.Thread(
+        target=server.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True
+    )
     thread.start()
     yield f"http://127.0.0.1:{port}"
     server.shutdown()
+    server.server_close()
 
 
 @pytest.fixture

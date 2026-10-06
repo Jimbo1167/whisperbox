@@ -245,6 +245,25 @@ class ModelRequestHandler(BaseHTTPRequestHandler):
         """Send an error response."""
         self._send_json_response({"error": message}, status)
 
+    def _reject_oversized_upload(self, content_length: int):
+        """Answer 413, then read and discard the body.
+
+        Closing the socket with the upload still unread makes the OS reset the
+        connection, and the client sees "connection reset" instead of the 413.
+        The client sends the whole body before reading a response anyway.
+        """
+        self._send_error(
+            f"Upload too large ({content_length} bytes). Max: {MAX_UPLOAD_SIZE} bytes.",
+            413
+        )
+        self.close_connection = True
+        remaining = content_length
+        while remaining > 0:
+            chunk = self.rfile.read(min(remaining, 1 << 20))
+            if not chunk:
+                break
+            remaining -= len(chunk)
+
     def do_GET(self):
         """Handle GET requests."""
         parsed_path = urllib.parse.urlparse(self.path)
@@ -331,10 +350,7 @@ class ModelRequestHandler(BaseHTTPRequestHandler):
             # Enforce upload size limit
             content_length = int(self.headers.get('Content-Length', 0))
             if content_length > MAX_UPLOAD_SIZE:
-                self._send_error(
-                    f"Upload too large ({content_length} bytes). Max: {MAX_UPLOAD_SIZE} bytes.",
-                    413
-                )
+                self._reject_oversized_upload(content_length)
                 return
 
             # Handle multipart form data (file upload)
@@ -349,10 +365,7 @@ class ModelRequestHandler(BaseHTTPRequestHandler):
             content_type = self.headers.get('Content-Type', '')
             content_length = int(self.headers.get('Content-Length', 0))
             if content_length > MAX_UPLOAD_SIZE:
-                self._send_error(
-                    f"Upload too large ({content_length} bytes). Max: {MAX_UPLOAD_SIZE} bytes.",
-                    413
-                )
+                self._reject_oversized_upload(content_length)
                 return
             if not content_type.startswith('multipart/form-data'):
                 self._send_error("Expected multipart/form-data")

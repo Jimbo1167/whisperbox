@@ -74,6 +74,7 @@ def test_torchcodec_probe_detects_lazy_load_failure(monkeypatch):
         _check_torchcodec_available()
 
 
+@pytest.mark.env
 def test_torchcodec_decodes_on_this_machine():
     """Environment assertion: the installed torchcodec must decode against the
     system FFmpeg. Fails after e.g. a `brew upgrade ffmpeg` past the majors the

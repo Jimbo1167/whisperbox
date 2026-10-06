@@ -2,6 +2,7 @@
 
 import platform
 import sys
+import types
 
 import pytest
 
@@ -26,6 +27,9 @@ def test_factory_default_config_returns_whisper_engine_off_apple_silicon(monkeyp
 
 def test_factory_default_config_returns_parakeet_engine_on_apple_silicon(monkeypatch):
     """Config default (no env override) routes to ParakeetEngine on Apple Silicon."""
+    # A defaulted parakeet falls back to whisper when parakeet-mlx can't be
+    # imported; make the import succeed regardless of the test machine.
+    monkeypatch.setitem(sys.modules, "parakeet_mlx", types.ModuleType("parakeet_mlx"))
     monkeypatch.delenv("TRANSCRIPTION_ENGINE", raising=False)
     monkeypatch.setattr(sys, "platform", "darwin")
     monkeypatch.setattr(platform, "machine", lambda: "arm64")

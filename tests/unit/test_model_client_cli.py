@@ -58,7 +58,12 @@ class FakeJobServer(BaseHTTPRequestHandler):
 
 
 @pytest.fixture
-def job_server():
+def job_server(monkeypatch):
+    # The Click command imports scripts.model_client; don't wait a real second
+    # between job polls.
+    import scripts.model_client
+
+    monkeypatch.setattr(scripts.model_client, "POLL_INTERVAL", 0.01)
     FakeJobServer.job = None
     FakeJobServer.last_post_body = None
     server = HTTPServer(("127.0.0.1", _free_port()), FakeJobServer)
