@@ -175,8 +175,10 @@ form.addEventListener("submit", async (event) => {
 fetch("/api/status")
   .then((response) => response.json())
   .then((payload) => {
-    const model = payload.model?.model_size || "unknown";
-    setStatus(`Server ready. Model: ${model}.`);
+    const info = payload.model || {};
+    const model = info.model || info.model_size || "unknown";
+    const engine = info.engine ? `${info.engine} ` : "";
+    setStatus(`Server ready. Model: ${engine}${model}.`);
     setProgress(0);
   })
   .catch(() => {

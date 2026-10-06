@@ -43,7 +43,6 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 from src.config import Config, load_env_file  # noqa: E402
 from src.service import TranscriptionService  # noqa: E402
-from src.transcription.engine import ParakeetEngine  # noqa: E402
 
 
 _VTT_TIMESTAMP_RE = re.compile(r"^\d{2}:\d{2}:\d{2}\.\d{3} -->")
@@ -178,25 +177,6 @@ def build_service(engine: str | None, model: str | None) -> TranscriptionService
     return TranscriptionService(Config(**config_kwargs))
 
 
-def active_engine_name(service: TranscriptionService) -> str:
-    """Name of the ASR engine the service will actually run.
-
-    Read from the constructed engine rather than the config, because a
-    defaulted parakeet selection silently falls back to whisper when
-    parakeet-mlx isn't installed.
-    """
-    asr_engine = service.transcriber.transcription_engine
-    return "parakeet" if isinstance(asr_engine, ParakeetEngine) else "whisper"
-
-
-def active_model_name(service: TranscriptionService) -> str:
-    """Model the service's ASR engine will actually load."""
-    asr_engine = service.transcriber.transcription_engine
-    if isinstance(asr_engine, ParakeetEngine):
-        return asr_engine.parakeet_model_id
-    return asr_engine.whisper_model_size
-
-
 def run_pipeline(service: TranscriptionService, audio_path: Path) -> Tuple[dict, float]:
     t0 = time.time()
     result = service.transcribe_file(str(audio_path))
@@ -243,7 +223,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"      audio={audio_path.name}  subs={subs_path.name}  id={video_id}", file=sys.stderr)
 
     service = build_service(args.engine, args.model)
-    engine = active_engine_name(service)
+    engine = service.engine_name
     print(f"[2/4] Running whisperbox pipeline (engine={engine})", file=sys.stderr)
     result, elapsed = run_pipeline(service, audio_path)
     print(f"      done in {elapsed:.1f}s  segments={len(result['segments'])}", file=sys.stderr)
@@ -261,7 +241,7 @@ def main(argv: list[str] | None = None) -> int:
         "video_title": meta.get("title"),
         "video_duration_s": meta.get("duration"),
         "engine": engine,
-        "model": active_model_name(service),
+        "model": service.model_name,
         "ref_source": (
             meta.get("ref_source") if not args.reference else f"file:{args.reference}"
         ) or "unknown",

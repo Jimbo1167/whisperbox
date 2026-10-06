@@ -27,7 +27,7 @@ from pathlib import Path
 # Add the parent directory to the path so we can import the package
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from src.config import Config, load_env_file
+from src.config import OUTPUT_FORMATS, Config, load_env_file
 from src.service import TranscriptionService
 
 # Configure logging
@@ -94,6 +94,34 @@ def _parse_multipart(content_type, body):
             else:
                 fields[name] = (None, payload.decode('utf-8', errors='replace'))
     return fields
+
+
+def _device_label() -> str:
+    """Where the loaded ASR engine runs. FORCE_CPU only applies to Whisper."""
+    if service.engine_name == "parakeet":
+        return "MLX (Apple GPU)"
+    return "CPU" if config.force_cpu else "GPU (if available)"
+
+
+def _unservable_request_options(fields) -> Optional[str]:
+    """Explain why a request's model/language can't be served, else None."""
+    if 'model' in fields:
+        _, requested = fields['model']
+        if requested and requested != service.model_name:
+            return (
+                f"This server runs the {service.engine_name} model {service.model_name} "
+                f"and can't switch models per request (asked for {requested}). Omit "
+                f"--model, or restart the server with that model."
+            )
+    if 'language' in fields and service.engine_name == "whisper":
+        _, requested = fields['language']
+        if requested and requested != config.language:
+            return (
+                f"This server transcribes language {config.language!r} and can't "
+                f"switch per request (asked for {requested!r}). Omit --language, or "
+                f"restart the server with LANGUAGE={requested}."
+            )
+    return None
 
 
 def _set_job_state(job_id: str, **updates):
@@ -242,12 +270,15 @@ class ModelRequestHandler(BaseHTTPRequestHandler):
                     "avg_processing_time": avg_time
                 }
 
-            # Get model info
-            device = "CPU" if config.force_cpu else "GPU (if available)"
+            # Get model info. `engine` and `model` name what is actually
+            # loaded; `model_size` (the Whisper model) is kept for older
+            # clients.
             model_info = {
+                "engine": service.engine_name,
+                "model": service.model_name,
                 "model_size": config.whisper_model_size,
                 "language": config.language,
-                "device": device
+                "device": _device_label()
             }
 
             self._send_json_response({
@@ -357,8 +388,19 @@ class ModelRequestHandler(BaseHTTPRequestHandler):
         output_format = config.output_format
         if 'format' in fields:
             _, fmt_value = fields['format']
-            if fmt_value in ('txt', 'srt', 'vtt', 'json', 'pretty'):
-                output_format = fmt_value
+            if fmt_value not in OUTPUT_FORMATS:
+                self._send_error(
+                    f"Unknown format {fmt_value!r}. Must be one of {OUTPUT_FORMATS}"
+                )
+                return
+            output_format = fmt_value
+
+        # The loaded model can't change per request; refuse rather than
+        # silently transcribing with something other than what was asked for.
+        mismatch = _unservable_request_options(fields)
+        if mismatch:
+            self._send_error(mismatch, 409)
+            return
 
         include_diarization = config.include_diarization
         if 'diarize' in fields:
@@ -537,8 +579,10 @@ def run_server(host: str, port: int):
     httpd = ThreadedHTTPServer(server_address, ModelRequestHandler)
 
     logger.info(f"Starting model server on {host}:{port}")
-    device = "CPU" if config.force_cpu else "GPU (if available)"
-    logger.info(f"Model: {config.whisper_model_size}, Device: {device}")
+    logger.info(
+        f"Engine: {service.engine_name}, Model: {service.model_name}, "
+        f"Device: {_device_label()}"
+    )
     logger.info("Press Ctrl+C to stop the server")
 
     try:
