@@ -38,7 +38,7 @@ def load_env_file(env_file: Optional[Union[str, Path]] = None) -> Optional[Path]
     if not path.is_file():
         logger.debug(f"No .env file at {path}")
         return None
-    logger.info(f"Loading configuration from {path}")
+    logger.debug(f"Loading configuration from {path}")
     load_dotenv(path, override=False)
     return path
 

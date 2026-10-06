@@ -271,3 +271,18 @@ def test_batch_diarizes_only_with_flag(project_env, wav_path, tmp_path, monkeypa
 
     batch_transcribe.main([str(wav_path), "-o", str(tmp_path / "out"), "-w", "1", *flag])
     assert seen[0].include_diarization is expected
+
+
+def test_loading_is_quiet_at_info_level(tmp_path, caplog):
+    """`transcribe --progress jsonl` keeps stderr parseable; load_env_file runs
+    before it lowers the log level, so it must not log at INFO."""
+    import logging
+
+    env_file = tmp_path / ".env"
+    env_file.write_text("WHISPER_MODEL=tiny\n", encoding="utf-8")
+    caplog.set_level(logging.INFO, logger="src.config")
+
+    with patch.dict(os.environ, {}, clear=True):
+        load_env_file(env_file)
+
+    assert [r for r in caplog.records if r.levelno >= logging.INFO] == []
