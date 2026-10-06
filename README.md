@@ -213,7 +213,7 @@ export PARAKEET_MODEL=/path/to/local/mlx-checkpoint
 
 - **Apple Silicon only.** The `parakeet-mlx` dependency in `requirements.txt` carries a platform marker, so Linux, Docker and Intel macOS installs skip it. Leave `TRANSCRIPTION_ENGINE` unset (or `whisper`) there: an explicit `parakeet` fails when the model loads (`No module named 'mlx'`), and `scripts/transcribe_video.py` rejects it up front.
 - **`FORCE_CPU` has no effect on Parakeet.** MLX runs on Apple Silicon with no equivalent setting; if `FORCE_CPU=true` is set with `engine=parakeet`, a warning is logged and the flag is ignored for transcription. It still applies to diarization.
-- **Streaming is Whisper-only.** `stream` and `batch --streaming` always run Whisper, whatever `TRANSCRIPTION_ENGINE` says.
+- **Streaming is Whisper-only.** `stream` and `batch --streaming` always run Whisper; if you chose Parakeet explicitly (`--engine` or `TRANSCRIPTION_ENGINE`), they log a warning first.
 - **Language and model.** Parakeet detects the language itself, so `LANGUAGE` and `--language` are ignored (an explicit `--language` logs a warning). Its model is set by `PARAKEET_MODEL`. `--model` names a Whisper model and selects Whisper for that run.
 - **Handy weights are not compatible.** Handy ships INT8 ONNX weights; `parakeet-mlx` requires MLX-format weights. Users wanting to reuse Handy's weights would need a different runtime (e.g. `onnx-asr`) — out of scope here.
 

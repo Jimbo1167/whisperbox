@@ -9,11 +9,9 @@ It allows sending transcription requests and viewing server status.
 import os
 import sys
 import time
-import json
 import logging
 import argparse
 import requests
-from pathlib import Path
 
 # Add the parent directory to the path so we can import the src package
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -324,8 +322,15 @@ def main(argv=None):
                 try:
                     with open(args.output, 'w', encoding='utf-8') as f:
                         # The server formatted the transcript in the requested
-                        # format (preview_text); write exactly that.
-                        f.write(result['preview_text'])
+                        # format (preview_text); write exactly that. A result
+                        # without it gets the console rendering.
+                        text = result.get('preview_text')
+                        if text is None:
+                            text = "".join(
+                                format_segment(segment) + "\n"
+                                for segment in result.get('segments', [])
+                            )
+                        f.write(text)
                     
                     logger.info(f"Transcription saved to {args.output}")
                 except Exception as e:

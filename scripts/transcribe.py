@@ -145,9 +145,10 @@ def transcribe(input_path, output, diarize, model, engine, language, output_form
             output=output,
             format=config.output_format,
             diarize=bool(config.include_diarization),
-            engine=config.transcription_engine,
-            model=(config.parakeet_model if config.transcription_engine == 'parakeet'
-                   else config.whisper_model_size),
+            # From the built engine: a defaulted Parakeet falls back to
+            # Whisper when parakeet-mlx isn't installed.
+            engine=service.engine_name,
+            model=service.model_name,
             language=config.language,
         )
 

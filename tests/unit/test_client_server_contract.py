@@ -15,15 +15,11 @@ model client and routing code are the production ones.
 
 from __future__ import annotations
 
-import json
-import logging
 import socket
 import sys
 import threading
-import wave
 from pathlib import Path
 
-import numpy as np
 import pytest
 import requests
 
@@ -110,17 +106,6 @@ def start_server(tmp_path, monkeypatch):
     for httpd in servers:
         httpd.shutdown()
         httpd.server_close()
-
-
-@pytest.fixture
-def wav_path(tmp_path):
-    path = tmp_path / "clip.wav"
-    with wave.open(str(path), "wb") as f:
-        f.setnchannels(1)
-        f.setsampwidth(2)
-        f.setframerate(16000)
-        f.writeframes(np.zeros(1600, dtype=np.int16).tobytes())
-    return path
 
 
 # --- model_client (multipart upload + job polling) --------------------------

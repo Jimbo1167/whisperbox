@@ -9,10 +9,8 @@ from __future__ import annotations
 
 import sys
 import threading
-import wave
 from pathlib import Path
 
-import numpy as np
 import pytest
 from click.testing import CliRunner
 
@@ -25,9 +23,22 @@ import scripts.transcribe as transcribe_cli  # noqa: E402
 
 class FakeService:
     configs: list = []
+    # What the built engine reports; None mirrors the config.
+    built_engine = None
 
     def __init__(self, config, **kwargs):
+        self.config = config
         type(self).configs.append(config)
+
+    @property
+    def engine_name(self):
+        return type(self).built_engine or self.config.transcription_engine
+
+    @property
+    def model_name(self):
+        if self.engine_name == "parakeet":
+            return self.config.parakeet_model
+        return self.config.whisper_model_size
 
     def transcribe_file(self, input_path, output_path=None, progress_callback=None):
         Path(output_path).write_text("hello", encoding="utf-8")
@@ -50,22 +61,12 @@ class FakeTranscriber:
 @pytest.fixture(autouse=True)
 def fakes(monkeypatch):
     FakeService.configs = []
+    FakeService.built_engine = None
     FakeTranscriber.configs = []
     monkeypatch.setattr(transcribe_cli, "TranscriptionService", FakeService)
     monkeypatch.setattr(batch_transcribe, "Transcriber", FakeTranscriber)
     monkeypatch.setattr(batch_transcribe, "_worker_state", threading.local())
     monkeypatch.delenv("TRANSCRIPTION_ENGINE", raising=False)
-
-
-@pytest.fixture
-def wav_path(tmp_path):
-    path = tmp_path / "clip.wav"
-    with wave.open(str(path), "wb") as f:
-        f.setnchannels(1)
-        f.setsampwidth(2)
-        f.setframerate(16000)
-        f.writeframes(np.zeros(1600, dtype=np.int16).tobytes())
-    return path
 
 
 def _transcribe(wav_path, tmp_path, *args):
@@ -127,3 +128,24 @@ def test_jsonl_started_event_names_the_engine_and_its_model(wav_path, tmp_path, 
     )
     assert started["engine"] == "parakeet"
     assert started["model"] == "mlx-community/parakeet-tdt-0.6b-v3"
+
+
+def test_jsonl_started_event_names_the_engine_that_was_built(wav_path, tmp_path):
+    """A defaulted Parakeet falls back to Whisper without parakeet-mlx; the
+    event must say what runs, not what was configured."""
+    import json
+
+    FakeService.built_engine = "whisper"
+    result = CliRunner().invoke(
+        transcribe_cli.cli,
+        ["transcribe", str(wav_path), "-o", str(tmp_path / "out.txt"),
+         "--progress", "jsonl", "--engine", "parakeet"],
+    )
+
+    assert result.exit_code == 0, result.output
+    started = next(
+        json.loads(line) for line in result.output.splitlines()
+        if line.startswith("{") and '"started"' in line
+    )
+    assert started["engine"] == "whisper"
+    assert started["model"] == FakeService.configs[0].whisper_model_size

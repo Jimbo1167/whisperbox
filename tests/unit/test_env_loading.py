@@ -12,11 +12,9 @@ from __future__ import annotations
 
 import os
 import sys
-import wave
 from pathlib import Path
 from unittest.mock import patch
 
-import numpy as np
 import pytest
 from click.testing import CliRunner
 
@@ -38,17 +36,6 @@ def project_env(tmp_path, monkeypatch):
         return env_path
 
     return write
-
-
-@pytest.fixture
-def wav_path(tmp_path):
-    path = tmp_path / "clip.wav"
-    with wave.open(str(path), "wb") as f:
-        f.setnchannels(1)
-        f.setsampwidth(2)
-        f.setframerate(16000)
-        f.writeframes(np.zeros(1600, dtype=np.int16).tobytes())
-    return path
 
 
 class TestLoadEnvFile:
@@ -285,4 +272,20 @@ def test_loading_is_quiet_at_info_level(tmp_path, caplog):
     with patch.dict(os.environ, {}, clear=True):
         load_env_file(env_file)
 
+    assert [r for r in caplog.records if r.levelno >= logging.INFO] == []
+
+
+def test_missing_explicit_file_warns(tmp_path, caplog):
+    # `server --config prod.env` with a typo must not silently run on defaults.
+    with patch.dict(os.environ, {}, clear=True):
+        assert load_env_file(tmp_path / "prod.env") is None
+    assert "prod.env" in caplog.text
+
+
+def test_missing_project_file_is_silent(project_env, caplog):
+    import logging
+
+    caplog.set_level(logging.INFO, logger="src.config")
+    with patch.dict(os.environ, {}, clear=True):
+        assert load_env_file() is None
     assert [r for r in caplog.records if r.levelno >= logging.INFO] == []

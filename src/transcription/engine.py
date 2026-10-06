@@ -1,5 +1,4 @@
 import os
-import re
 import time
 import logging
 from typing import List, Dict, Any, Optional, Tuple, Iterator, Generator, Protocol, runtime_checkable
@@ -13,19 +12,12 @@ import numpy as np
 
 from ..config import Config
 from ..audio.processor import run_with_timeout, TimeoutException
-from ..cache.manager import CacheManager
+from ..cache.manager import CacheManager, _slug
 from .streaming import StreamingTranscriber, AsyncStreamingTranscriber
 
 logger = logging.getLogger(__name__)
 
 
-def _slug(text: str) -> str:
-    """Return a filesystem-safe slug for cache keys and filenames.
-
-    HF model ids contain '/'; local paths contain '/' (and on macOS, spaces).
-    Both must produce a single safe token.
-    """
-    return re.sub(r"[^A-Za-z0-9._-]", "_", text)
 
 
 @runtime_checkable

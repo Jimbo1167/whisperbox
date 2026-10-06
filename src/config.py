@@ -36,7 +36,12 @@ def load_env_file(env_file: Optional[Union[str, Path]] = None) -> Optional[Path]
     """
     path = Path(env_file) if env_file else DEFAULT_ENV_FILE
     if not path.is_file():
-        logger.debug(f"No .env file at {path}")
+        if env_file:
+            # Asked for by name (e.g. `server --config prod.env`): running on
+            # defaults instead must not go unnoticed.
+            logger.warning(f"Config file {path} not found; using the environment and defaults")
+        else:
+            logger.debug(f"No .env file at {path}")
         return None
     logger.debug(f"Loading configuration from {path}")
     load_dotenv(path, override=False)
@@ -168,6 +173,20 @@ class Config:
             )
 
         logger.debug(f"Configuration loaded: {self.to_dict()}")
+
+    def use_whisper_for_streaming(self) -> None:
+        """Switch to Whisper, the only engine that can stream.
+
+        Parakeet is the Apple Silicon default, so a defaulted engine switches
+        quietly; an explicitly chosen one switches with a warning.
+        """
+        if self.transcription_engine != "whisper" and not self.transcription_engine_defaulted:
+            logger.warning(
+                f"Streaming is Whisper-only; using Whisper instead of the "
+                f"{self.transcription_engine} engine you selected"
+            )
+        self.transcription_engine = "whisper"
+        self.transcription_engine_defaulted = False
 
     @property
     def output_format(self) -> str:

@@ -43,6 +43,10 @@ logger = logging.getLogger(__name__)
 
 # Maximum upload size: 500MB
 MAX_UPLOAD_SIZE = 500 * 1024 * 1024
+# After refusing an oversized upload, read at most this much of its body (and
+# wait at most this long for it) so the client sees the 413, not a reset.
+DRAIN_LIMIT = 64 * 1024 * 1024
+DRAIN_TIMEOUT = 10.0
 WEB_ROOT = Path(__file__).resolve().parent.parent / "web"
 TRANSCRIPTS_ROOT = Path.cwd() / "transcripts"
 
@@ -222,10 +226,12 @@ class ModelRequestHandler(BaseHTTPRequestHandler):
 
     def _send_json_response(self, data: Dict[str, Any], status: int = 200):
         """Send a JSON response."""
+        body = json.dumps(data).encode('utf-8')
         self.send_response(status)
         self.send_header('Content-Type', 'application/json')
+        self.send_header('Content-Length', str(len(body)))
         self.end_headers()
-        self.wfile.write(json.dumps(data).encode('utf-8'))
+        self.wfile.write(body)
 
     def _send_file_response(self, file_path: Path, content_type: str):
         """Send a static file response."""
@@ -246,23 +252,28 @@ class ModelRequestHandler(BaseHTTPRequestHandler):
         self._send_json_response({"error": message}, status)
 
     def _reject_oversized_upload(self, content_length: int):
-        """Answer 413, then read and discard the body.
+        """Answer 413, then read and discard (some of) the body.
 
         Closing the socket with the upload still unread makes the OS reset the
         connection, and the client sees "connection reset" instead of the 413.
-        The client sends the whole body before reading a response anyway.
+        The drain is bounded in bytes and time so a client that declares a
+        huge body, or stalls, can't hold the handler.
         """
         self._send_error(
             f"Upload too large ({content_length} bytes). Max: {MAX_UPLOAD_SIZE} bytes.",
             413
         )
         self.close_connection = True
-        remaining = content_length
-        while remaining > 0:
-            chunk = self.rfile.read(min(remaining, 1 << 20))
-            if not chunk:
-                break
-            remaining -= len(chunk)
+        self.connection.settimeout(DRAIN_TIMEOUT)
+        remaining = min(content_length, DRAIN_LIMIT)
+        try:
+            while remaining > 0:
+                chunk = self.rfile.read(min(remaining, 1 << 20))
+                if not chunk:
+                    break
+                remaining -= len(chunk)
+        except OSError:  # timed out or the client went away
+            pass
 
     def do_GET(self):
         """Handle GET requests."""

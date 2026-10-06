@@ -2,9 +2,8 @@ import os
 import sys
 import wave
 import pytest
-import tempfile
 import numpy as np
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock
 
 # Add the parent directory to the path so we can import the src package
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))

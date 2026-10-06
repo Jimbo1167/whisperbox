@@ -4,6 +4,7 @@ Pytest configuration and fixtures for testing the Whisperbox.
 
 import os
 import sys
+import wave
 import pytest
 from pathlib import Path
 from unittest.mock import patch, MagicMock
@@ -31,6 +32,18 @@ def isolate_from_developer_env(tmp_path):
     with patch.object(config_module, "DEFAULT_ENV_FILE", tmp_path / "no-such.env"), \
             patch.dict(os.environ, {"HOME": str(home)}):
         yield
+
+
+@pytest.fixture
+def wav_path(tmp_path):
+    """One second of 16 kHz mono silence (enough for fake-model pipelines)."""
+    path = tmp_path / "clip.wav"
+    with wave.open(str(path), "wb") as f:
+        f.setnchannels(1)
+        f.setsampwidth(2)
+        f.setframerate(16000)
+        f.writeframes(b"\x00\x00" * 16000)
+    return path
 
 
 @pytest.fixture(scope="session", autouse=True)

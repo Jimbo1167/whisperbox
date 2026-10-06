@@ -149,3 +149,20 @@ def test_client_transcribe_writes_output_file_when_job_completes(
     # The file holds the transcript the server formatted in the requested
     # format, not the client's console rendering.
     assert output.read_text() == _completed_job()["result"]["preview_text"]
+
+
+def test_output_file_falls_back_to_segments_without_preview_text(
+    job_server, input_file, tmp_path
+):
+    job = _completed_job()
+    del job["result"]["preview_text"]
+    FakeJobServer.job = job
+    output = tmp_path / "out.txt"
+
+    result = _run_client(job_server, input_file, "--output", str(output))
+
+    assert result.exit_code == 0, result.exception
+    assert output.read_text().splitlines() == [
+        "[00:00.000 --> 00:01.500] hello world",
+        "[00:01.500 --> 00:03.000] (SPEAKER_00) second line",
+    ]

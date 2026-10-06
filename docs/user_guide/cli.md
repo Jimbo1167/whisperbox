@@ -133,7 +133,7 @@ The `stream` command processes a file in streaming mode to reduce memory usage.
 python -m scripts.transcribe stream [OPTIONS] INPUT_PATH
 ```
 
-Streaming always uses the Whisper engine (Parakeet has no streaming mode), whatever `TRANSCRIPTION_ENGINE` is set to.
+Streaming always uses the Whisper engine (Parakeet has no streaming mode). If `TRANSCRIPTION_ENGINE` selects Parakeet explicitly, it logs a warning and uses Whisper.
 
 #### Options
 
@@ -205,7 +205,7 @@ python -m scripts.transcribe batch [OPTIONS] INPUT_PATTERN
 - `--diarize, -d`: Include speaker diarization
 - `--workers, -w INTEGER`: Number of parallel workers (default: 0 = auto, based on CPU count and free memory)
 - `--adaptive, -a`: Use an adaptive worker pool that adjusts to system load
-- `--streaming, -s`: Use streaming transcription (reduces memory usage; always uses Whisper)
+- `--streaming, -s`: Use streaming transcription (reduces memory usage; always uses Whisper, with a warning if `--engine parakeet` or `TRANSCRIPTION_ENGINE=parakeet` was set)
 - `--help`: Show help message and exit
 
 Each worker loads its own copy of the models, so memory use grows with the number

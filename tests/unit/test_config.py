@@ -268,3 +268,25 @@ class TestWhisperModelSelectsEngine:
     def test_language_override_under_parakeet_warns(self, caplog):
         Config(language="fr")
         assert "language" in caplog.text.lower()
+
+
+class TestWhisperForStreaming:
+    """Streaming is Whisper-only; switching an explicit engine must be visible."""
+
+    @pytest.fixture(autouse=True)
+    def apple_silicon(self, monkeypatch):
+        monkeypatch.setattr(sys, "platform", "darwin")
+        monkeypatch.setattr(platform, "machine", lambda: "arm64")
+        monkeypatch.delenv("TRANSCRIPTION_ENGINE", raising=False)
+
+    def test_defaulted_engine_switches_quietly(self, caplog):
+        cfg = Config()
+        cfg.use_whisper_for_streaming()
+        assert cfg.transcription_engine == "whisper"
+        assert "Whisper-only" not in caplog.text
+
+    def test_explicit_engine_switches_with_a_warning(self, caplog):
+        cfg = Config(transcription_engine="parakeet")
+        cfg.use_whisper_for_streaming()
+        assert cfg.transcription_engine == "whisper"
+        assert "Whisper-only" in caplog.text

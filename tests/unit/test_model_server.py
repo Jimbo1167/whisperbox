@@ -227,3 +227,27 @@ def test_sync_endpoint_forwards_the_diarize_field(server, data, expected):
     assert response.status_code == 200
     assert response.json() == {"text": "hello world"}
     assert fake_service.calls == [{"include_diarization": expected}]
+
+
+def test_oversized_upload_drain_is_bounded(server, monkeypatch):
+    """A client that declares a huge body and stalls can't pin a handler."""
+    import socket
+
+    url, fake_service = server
+    monkeypatch.setattr(model_server, "MAX_UPLOAD_SIZE", 10)
+    monkeypatch.setattr(model_server, "DRAIN_TIMEOUT", 0.3)
+    host, port = url.removeprefix("http://").split(":")
+
+    with socket.create_connection((host, int(port)), timeout=5) as sock:
+        sock.sendall(
+            b"POST /api/transcribe HTTP/1.1\r\nHost: x\r\n"
+            b"Content-Type: multipart/form-data; boundary=b\r\n"
+            b"Content-Length: 10000000000\r\n\r\n" + b"\x00" * 1000
+        )
+        response = b""
+        while chunk := sock.recv(65536):  # ends when the server closes
+            response += chunk
+
+    assert response.startswith(b"HTTP/1.0 413")
+    assert b"Content-Length:" in response
+    assert fake_service.calls == []

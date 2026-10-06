@@ -19,6 +19,15 @@ from ..config import Config
 
 logger = logging.getLogger(__name__)
 
+def _slug(text: str) -> str:
+    """Return a filesystem-safe slug for cache keys and filenames.
+
+    HF model ids contain '/'; local paths contain '/' (and on macOS, spaces).
+    Both must produce a single safe token.
+    """
+    return re.sub(r"[^A-Za-z0-9._-]", "_", text)
+
+
 class CacheManager:
     """
     Manages caching for the Whisperbox.
@@ -329,7 +338,7 @@ class CacheManager:
     
     @staticmethod
     def _diarization_prefix(model_id: str) -> str:
-        return "diarization-" + re.sub(r"[^A-Za-z0-9._-]", "_", model_id)
+        return f"diarization-{_slug(model_id)}"
 
     def get_cached_diarization(
         self, audio_path: str, model_id: str = "pyannote"

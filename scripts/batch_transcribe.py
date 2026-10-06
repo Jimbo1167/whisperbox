@@ -247,13 +247,11 @@ def main(args=None):
     # Diarization is opt-in per run; INCLUDE_DIARIZATION only sets the model
     # server's default.
     config_kwargs['include_diarization'] = args.diarize
-    if args.streaming:
-        # Streaming is Whisper-only (Transcriber.transcribe_stream raises for
-        # any other engine), and Parakeet is the platform default on Apple
-        # Silicon.
-        config_kwargs['transcription_engine'] = 'whisper'
     
     config = Config(**config_kwargs)
+    if args.streaming:
+        # Transcriber.transcribe_stream raises for any engine but Whisper
+        config.use_whisper_for_streaming()
     
     # Determine worker count
     if args.workers > 0:

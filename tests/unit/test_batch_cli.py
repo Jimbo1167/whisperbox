@@ -130,3 +130,13 @@ def test_streaming_without_diarization_has_no_speaker_labels(tmp_path):
     text = (tmp_path / "out" / "a.txt").read_text(encoding="utf-8")
     assert "hello" in text
     assert "SPEAKER" not in text
+
+
+def test_streaming_with_explicit_parakeet_warns(tmp_path, apple_silicon, caplog):
+    pattern = _media(tmp_path, "a.wav")
+
+    result = _batch(pattern, "-o", str(tmp_path / "out"), "--streaming", "--engine", "parakeet")
+
+    assert result.exit_code == 0, result.output
+    assert FakeTranscriber.configs[0].transcription_engine == "whisper"
+    assert "Whisper-only" in caplog.text

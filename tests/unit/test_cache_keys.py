@@ -8,11 +8,8 @@ transcript; the diarization cache ignored DIARIZATION_MODEL.
 from __future__ import annotations
 
 import sys
-import wave
 from pathlib import Path
 
-import numpy as np
-import pytest
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(_REPO_ROOT))
@@ -34,48 +31,37 @@ class _FakeWhisper:
         return iter([_Segment(f"{kwargs['language']}-beam{kwargs['beam_size']}")]), None
 
 
-@pytest.fixture
-def audio(tmp_path):
-    path = tmp_path / "clip.wav"
-    with wave.open(str(path), "wb") as f:
-        f.setnchannels(1)
-        f.setsampwidth(2)
-        f.setframerate(16000)
-        f.writeframes(np.zeros(1600, dtype=np.int16).tobytes())
-    return str(path)
-
-
-def _transcribe(audio, monkeypatch, **env):
+def _transcribe(audio_path, monkeypatch, **env):
     for key, value in env.items():
         monkeypatch.setenv(key, value)
     engine = WhisperEngine(Config(transcription_engine="whisper"), test_mode=True)
     engine.whisper = _FakeWhisper()
-    return engine.transcribe(audio)[0]["text"]
+    return engine.transcribe(audio_path)[0]["text"]
 
 
-def test_transcript_cache_is_reused_for_the_same_settings(audio, monkeypatch):
-    assert _transcribe(audio, monkeypatch, LANGUAGE="en") == "en-beam5"
+def test_transcript_cache_is_reused_for_the_same_settings(wav_path, monkeypatch):
+    assert _transcribe(str(wav_path), monkeypatch, LANGUAGE="en") == "en-beam5"
 
     calls = []
     engine = WhisperEngine(Config(transcription_engine="whisper"), test_mode=True)
     engine.whisper = type("Never", (), {"transcribe": lambda *a, **k: calls.append(1)})()
-    assert engine.transcribe(audio)[0]["text"] == "en-beam5"
+    assert engine.transcribe(str(wav_path))[0]["text"] == "en-beam5"
     assert calls == []
 
 
-def test_changing_language_does_not_return_the_cached_transcript(audio, monkeypatch):
-    assert _transcribe(audio, monkeypatch, LANGUAGE="en") == "en-beam5"
-    assert _transcribe(audio, monkeypatch, LANGUAGE="fr") == "fr-beam5"
+def test_changing_language_does_not_return_the_cached_transcript(wav_path, monkeypatch):
+    assert _transcribe(str(wav_path), monkeypatch, LANGUAGE="en") == "en-beam5"
+    assert _transcribe(str(wav_path), monkeypatch, LANGUAGE="fr") == "fr-beam5"
 
 
-def test_changing_beam_size_does_not_return_the_cached_transcript(audio, monkeypatch):
-    assert _transcribe(audio, monkeypatch, WHISPER_BEAM_SIZE="5") == "en-beam5"
-    assert _transcribe(audio, monkeypatch, WHISPER_BEAM_SIZE="1") == "en-beam1"
+def test_changing_beam_size_does_not_return_the_cached_transcript(wav_path, monkeypatch):
+    assert _transcribe(str(wav_path), monkeypatch, WHISPER_BEAM_SIZE="5") == "en-beam5"
+    assert _transcribe(str(wav_path), monkeypatch, WHISPER_BEAM_SIZE="1") == "en-beam1"
 
 
-def test_diarization_cache_is_scoped_by_model(audio):
+def test_diarization_cache_is_scoped_by_model(wav_path):
     cache = CacheManager(Config())
-    cache.cache_diarization(audio, [{"speaker": "A"}], model_id="pyannote/model-a")
+    cache.cache_diarization(str(wav_path), [{"speaker": "A"}], model_id="pyannote/model-a")
 
-    assert cache.get_cached_diarization(audio, model_id="pyannote/model-a") == [{"speaker": "A"}]
-    assert cache.get_cached_diarization(audio, model_id="pyannote/model-b") is None
+    assert cache.get_cached_diarization(str(wav_path), model_id="pyannote/model-a") == [{"speaker": "A"}]
+    assert cache.get_cached_diarization(str(wav_path), model_id="pyannote/model-b") is None

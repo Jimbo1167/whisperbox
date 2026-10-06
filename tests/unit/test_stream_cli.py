@@ -10,10 +10,8 @@ from __future__ import annotations
 
 import json
 import sys
-import wave
 from pathlib import Path
 
-import numpy as np
 import pytest
 from click.testing import CliRunner
 
@@ -73,17 +71,6 @@ def fake_transcriber(monkeypatch):
     # Keep the test independent of the developer's .env.
     monkeypatch.setenv("INCLUDE_DIARIZATION", "false")
     return FakeTranscriber
-
-
-@pytest.fixture
-def wav_path(tmp_path):
-    path = tmp_path / "clip.wav"
-    with wave.open(str(path), "wb") as f:
-        f.setnchannels(1)
-        f.setsampwidth(2)
-        f.setframerate(16000)
-        f.writeframes(np.zeros(16000, dtype=np.int16).tobytes())
-    return path
 
 
 def test_stream_words_json_writes_word_timestamps(wav_path, tmp_path):
