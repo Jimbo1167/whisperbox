@@ -16,7 +16,7 @@ from pathlib import Path
 # Add the parent directory to the path so we can import the src package
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from src.config import Config
+from src.config import Config, load_env_file
 from src.server_client import transcribe_with_server_fallback
 
 logger = logging.getLogger(__name__)
@@ -67,7 +67,8 @@ def main():
     start_time = time.time()
     
     logger.info("\nInitializing transcriber...")
-    config = Config(".env")  # Explicitly load from .env file
+    load_env_file()
+    config = Config()
     
     # Override config with command line arguments
     if args.format:

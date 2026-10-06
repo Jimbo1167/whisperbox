@@ -21,7 +21,7 @@ from tqdm import tqdm
 # Add the parent directory to the path so we can import the package
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from src.config import Config
+from src.config import Config, load_env_file
 from src.transcriber import Transcriber
 from src.utils.resource_monitor import AdaptiveWorkerPool, get_optimal_worker_count
 from src.utils.progress import ProgressReporter, MultiProgressReporter
@@ -225,6 +225,8 @@ def main(args=None):
     
     logger.info(f"Found {len(input_files)} files to process")
     
+    load_env_file()
+
     # Create configuration
     config_kwargs = {}
     if args.model:
@@ -233,8 +235,9 @@ def main(args=None):
         config_kwargs['language'] = args.language
     if args.format:
         config_kwargs['output_format'] = args.format
-    if args.diarize:
-        config_kwargs['include_diarization'] = True
+    # Diarization is opt-in per run; INCLUDE_DIARIZATION only sets the model
+    # server's default.
+    config_kwargs['include_diarization'] = args.diarize
     
     config = Config(**config_kwargs)
     

@@ -41,7 +41,7 @@ import jiwer
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from src.config import Config  # noqa: E402
+from src.config import Config, load_env_file  # noqa: E402
 from src.service import TranscriptionService  # noqa: E402
 from src.transcription.engine import ParakeetEngine  # noqa: E402
 
@@ -169,6 +169,7 @@ def compute_metrics(reference: str, hypothesis: str) -> dict:
 
 
 def build_service(engine: str | None, model: str | None) -> TranscriptionService:
+    load_env_file()
     config_kwargs = {"include_diarization": False}
     if engine:
         config_kwargs["transcription_engine"] = engine

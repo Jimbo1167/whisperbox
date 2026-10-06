@@ -16,7 +16,7 @@ from pathlib import Path
 # Add the parent directory to the path so we can import the src package
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from src.config import Config
+from src.config import Config, load_env_file
 from src.transcriber import Transcriber
 from src.utils.progress import ProgressReporter
 
@@ -106,6 +106,8 @@ def main(argv=None):
         logger.error(f"Input file not found: {args.input_path}")
         return 1
     
+    load_env_file()
+
     # Create configuration
     config_kwargs = {}
     if args.model:
@@ -114,8 +116,9 @@ def main(argv=None):
         config_kwargs['language'] = args.language
     if args.format:
         config_kwargs['output_format'] = args.format
-    if args.diarize:
-        config_kwargs['include_diarization'] = True
+    # Diarization is opt-in per run; INCLUDE_DIARIZATION only sets the model
+    # server's default.
+    config_kwargs['include_diarization'] = args.diarize
     # Streaming is Whisper-only (Transcriber.transcribe_stream raises for any
     # other engine), and Parakeet is the platform default on Apple Silicon.
     config_kwargs['transcription_engine'] = 'whisper'

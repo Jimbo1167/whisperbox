@@ -27,7 +27,7 @@ from pathlib import Path
 # Add the parent directory to the path so we can import the package
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from src.config import Config
+from src.config import Config, load_env_file
 from src.service import TranscriptionService
 
 # Configure logging
@@ -523,8 +523,9 @@ def initialize_models(config_path: Optional[str] = None):
 
     logger.info("Initializing models...")
 
-    # Load configuration
-    config = Config(config_path or ".env")
+    # Load configuration (the project's .env unless a path is given)
+    load_env_file(config_path)
+    config = Config()
     service = TranscriptionService(config=config, preload_models=True)
 
     logger.info("Models initialized successfully")
@@ -562,7 +563,7 @@ def main(argv=None):
     parser.add_argument("--port", "-p", type=int, default=8000,
                        help="Port to bind the server to (default: 8000)")
     parser.add_argument("--config", "-c",
-                       help="Path to configuration file (default: .env)")
+                       help="Path to a .env file (default: the project's .env)")
     parser.add_argument("--verbose", "-v", action="store_true",
                        help="Enable verbose logging")
 

@@ -22,6 +22,20 @@ from src.output.formatter import OutputFormatter
 from tests.fixtures.generate_test_files import create_test_video, create_test_wav
 
 
+@pytest.fixture(autouse=True)
+def isolate_from_developer_env(tmp_path):
+    """Keep the developer's .env (and anything it loads) out of every test.
+
+    Entry points call load_env_file(), which would otherwise read the real
+    project .env and leave its values in os.environ for later tests.
+    """
+    import src.config as config_module
+
+    with patch.object(config_module, "DEFAULT_ENV_FILE", tmp_path / "no-such.env"), \
+            patch.dict(os.environ):
+        yield
+
+
 @pytest.fixture(scope="session", autouse=True)
 def ensure_test_media():
     """Generate media fixtures on demand so a fresh checkout can run tests."""

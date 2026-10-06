@@ -1,11 +1,40 @@
 import os
 import platform
 import sys
-from typing import Optional, Dict, Any
+from pathlib import Path
+from typing import Optional, Dict, Any, Union
 from dotenv import load_dotenv
 import logging
 
 logger = logging.getLogger(__name__)
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+# The .env every entry point reads, regardless of the working directory.
+DEFAULT_ENV_FILE = PROJECT_ROOT / ".env"
+
+
+def load_env_file(env_file: Optional[Union[str, Path]] = None) -> Optional[Path]:
+    """Load a .env file into the environment without overriding it.
+
+    Variables already set in the environment (exported in the shell, or set
+    inline as in ``INCLUDE_DIARIZATION=true python ...``) take precedence over
+    the file.
+
+    Args:
+        env_file: Path to the file; defaults to the project's ``.env``.
+
+    Returns:
+        The path that was loaded, or None if the file doesn't exist.
+    """
+    path = Path(env_file) if env_file else DEFAULT_ENV_FILE
+    if not path.is_file():
+        logger.debug(f"No .env file at {path}")
+        return None
+    logger.info(f"Loading configuration from {path}")
+    load_dotenv(path, override=False)
+    return path
+
 
 class Config:
     """Configuration class to handle all settings for the Whisperbox.
@@ -17,17 +46,15 @@ class Config:
         """Initialize configuration from environment variables.
 
         Args:
-            env_file: Optional path to a .env file to load
+            env_file: Optional path to a .env file to load first; variables
+                already in the environment win over the file
             **overrides: Optional keyword arguments to override env values.
                 Supported keys: whisper_model, language, output_format,
                 include_diarization, diarization_model, force_cpu,
                 transcription_engine, parakeet_model
         """
         if env_file:
-            logger.info(f"Loading configuration from {env_file}")
-            load_dotenv(env_file, override=True)
-        else:
-            logger.info("Using existing environment variables for configuration")
+            load_env_file(env_file)
 
         # API tokens and model settings
         self.hf_token = os.getenv("HF_TOKEN")

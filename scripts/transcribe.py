@@ -17,7 +17,7 @@ from typing import Optional, List, Tuple
 # Add the parent directory to the path so we can import the src package
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from src.config import Config
+from src.config import Config, load_env_file
 from src.service import TranscriptionService
 from src.utils.progress_events import JsonlProgressEmitter
 from src.utils.resource_monitor import ResourceMonitor
@@ -101,6 +101,8 @@ def transcribe(input_path, output, diarize, model, language, output_format, prog
     """
     start_time = time.time()
 
+    load_env_file()
+
     # Create configuration
     config_kwargs = {}
     if model:
@@ -109,8 +111,9 @@ def transcribe(input_path, output, diarize, model, language, output_format, prog
         config_kwargs['language'] = language
     if output_format:
         config_kwargs['output_format'] = output_format
-    if diarize:
-        config_kwargs['include_diarization'] = True
+    # Diarization is opt-in per run, as with `client`: INCLUDE_DIARIZATION
+    # only sets the model server's default.
+    config_kwargs['include_diarization'] = diarize
 
     config = Config(**config_kwargs)
 
@@ -287,8 +290,8 @@ def batch(input_pattern, output_dir, workers, adaptive, diarize, streaming,
               help='Host to bind the server to.')
 @click.option('--port', '-p', type=int, default=8000,
               help='Port to bind the server to.')
-@click.option('--config', '-c', type=click.Path(), default='.env',
-              help='Path to configuration file.')
+@click.option('--config', '-c', type=click.Path(),
+              help="Path to a .env file (default: the project's .env).")
 def server(host, port, config):
     """Run a model server for persistent model instances.
     
