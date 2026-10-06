@@ -232,3 +232,39 @@ class TestWhisperTuning:
         assert d["whisper_beam_size"] == 5
         assert d["whisper_cpu_threads"] == 0
         assert d["whisper_batch_size"] == 0
+
+
+class TestWhisperModelSelectsEngine:
+    """An explicit Whisper model request (--model) used to be silently ignored
+    on Apple Silicon, where Parakeet is the default engine."""
+
+    @pytest.fixture(autouse=True)
+    def apple_silicon(self, monkeypatch):
+        monkeypatch.setattr(sys, "platform", "darwin")
+        monkeypatch.setattr(platform, "machine", lambda: "arm64")
+        monkeypatch.delenv("TRANSCRIPTION_ENGINE", raising=False)
+
+    def test_model_override_selects_whisper_over_the_platform_default(self):
+        cfg = Config(whisper_model="medium")
+        assert cfg.transcription_engine == "whisper"
+        assert cfg.whisper_model_size == "medium"
+
+    def test_model_from_env_alone_keeps_the_platform_default(self, monkeypatch):
+        # WHISPER_MODEL in .env configures Whisper for when it's used; it
+        # isn't a request to switch engines.
+        monkeypatch.setenv("WHISPER_MODEL", "medium")
+        assert Config().transcription_engine == "parakeet"
+
+    def test_explicit_parakeet_wins_and_warns(self, monkeypatch, caplog):
+        monkeypatch.setenv("TRANSCRIPTION_ENGINE", "parakeet")
+        cfg = Config(whisper_model="medium")
+        assert cfg.transcription_engine == "parakeet"
+        assert "no effect" in caplog.text
+
+    def test_explicit_parakeet_override_wins(self):
+        cfg = Config(whisper_model="medium", transcription_engine="parakeet")
+        assert cfg.transcription_engine == "parakeet"
+
+    def test_language_override_under_parakeet_warns(self, caplog):
+        Config(language="fr")
+        assert "language" in caplog.text.lower()

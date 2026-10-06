@@ -33,8 +33,14 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
-# Define model size options
-MODEL_SIZES = ['tiny', 'base', 'small', 'medium', 'large']
+# ASR engines selectable per run (TRANSCRIPTION_ENGINE sets the default).
+ENGINES = ['whisper', 'parakeet']
+
+# Any name faster-whisper accepts (size, Hugging Face repo id, or local path).
+MODEL_HELP = ('Whisper model, e.g. tiny, base, small, medium, large-v3, large-v3-turbo. '
+              'Selects the Whisper engine unless --engine is given.')
+ENGINE_HELP = ('ASR engine (default: TRANSCRIPTION_ENGINE, else parakeet on Apple '
+               'Silicon and whisper elsewhere).')
 
 # Progress reporting modes. ``pretty`` is the legacy click-colored output;
 # ``jsonl`` emits machine-readable events on stderr for programmatic callers;
@@ -72,7 +78,8 @@ def cli(ctx, verbose):
 @click.argument('input_path', type=click.Path(exists=True))
 @click.option('--output', '-o', type=click.Path(), help='Output file path.')
 @click.option('--diarize', '-d', is_flag=True, help='Include speaker diarization.')
-@click.option('--model', '-m', type=click.Choice(MODEL_SIZES), help='Whisper model size.')
+@click.option('--model', '-m', help=MODEL_HELP)
+@click.option('--engine', '-e', type=click.Choice(ENGINES), help=ENGINE_HELP)
 @click.option('--language', '-l', help='Language code (e.g., en, fr, de).')
 @click.option('--format', '-f', 'output_format', type=click.Choice(OUTPUT_FORMATS),
               help='Output format.')
@@ -80,7 +87,8 @@ def cli(ctx, verbose):
               default='pretty', show_default=True,
               help='Progress reporting mode. Use "jsonl" to emit one JSON event '
                    'per line on stderr for programmatic callers.')
-def transcribe(input_path, output, diarize, model, language, output_format, progress_mode):
+def transcribe(input_path, output, diarize, model, engine, language, output_format,
+               progress_mode):
     """Transcribe an audio or video file.
 
     This command transcribes the given audio or video file and saves the result
@@ -102,6 +110,8 @@ def transcribe(input_path, output, diarize, model, language, output_format, prog
     config_kwargs = {}
     if model:
         config_kwargs['whisper_model'] = model
+    if engine:
+        config_kwargs['transcription_engine'] = engine
     if language:
         config_kwargs['language'] = language
     if output_format:
@@ -135,7 +145,9 @@ def transcribe(input_path, output, diarize, model, language, output_format, prog
             output=output,
             format=config.output_format,
             diarize=bool(config.include_diarization),
-            model=config.whisper_model_size,
+            engine=config.transcription_engine,
+            model=(config.parakeet_model if config.transcription_engine == 'parakeet'
+                   else config.whisper_model_size),
             language=config.language,
         )
 
@@ -190,7 +202,7 @@ def transcribe(input_path, output, diarize, model, language, output_format, prog
 @click.option('--output', '-o', type=click.Path(), help='Output file path.')
 @click.option('--diarize', '-d', is_flag=True, help='Include speaker diarization.')
 @click.option('--words', '-w', is_flag=True, help='Include word-level timestamps.')
-@click.option('--model', '-m', type=click.Choice(MODEL_SIZES), help='Whisper model size.')
+@click.option('--model', '-m', help=MODEL_HELP)
 @click.option('--language', '-l', help='Language code (e.g., en, fr, de).')
 @click.option('--format', '-f', 'output_format', type=click.Choice(OUTPUT_FORMATS), 
               help='Output format.')
@@ -239,13 +251,14 @@ def stream(input_path, output, diarize, words, model, language, output_format):
               help='Use adaptive worker pool that adjusts based on system load.')
 @click.option('--diarize', '-d', is_flag=True, help='Include speaker diarization.')
 @click.option('--streaming', '-s', is_flag=True,
-              help='Use streaming transcription (reduces memory usage).')
-@click.option('--model', '-m', type=click.Choice(MODEL_SIZES), help='Whisper model size.')
+              help='Use streaming transcription (reduces memory usage; Whisper only).')
+@click.option('--model', '-m', help=MODEL_HELP)
+@click.option('--engine', '-e', type=click.Choice(ENGINES), help=ENGINE_HELP)
 @click.option('--language', '-l', help='Language code (e.g., en, fr, de).')
 @click.option('--format', '-f', 'output_format', type=click.Choice(OUTPUT_FORMATS), 
               help='Output format.')
 def batch(input_pattern, output_dir, workers, adaptive, diarize, streaming,
-          model, language, output_format):
+          model, engine, language, output_format):
     """Batch process multiple audio or video files.
     
     This command processes multiple files matching the given glob pattern.
@@ -272,6 +285,8 @@ def batch(input_pattern, output_dir, workers, adaptive, diarize, streaming,
         args.append('--streaming')
     if model:
         args.extend(['--model', model])
+    if engine:
+        args.extend(['--engine', engine])
     if language:
         args.extend(['--language', language])
     if output_format:

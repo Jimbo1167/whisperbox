@@ -181,7 +181,14 @@ def main(args=None):
     parser.add_argument(
         "--model", "-m", 
         default=None,
-        help="Whisper model size (tiny, base, small, medium, large)"
+        help="Whisper model (e.g. small, large-v3-turbo); selects Whisper unless --engine is given"
+    )
+    
+    parser.add_argument(
+        "--engine", "-e",
+        choices=["whisper", "parakeet"],
+        default=None,
+        help="ASR engine (default: TRANSCRIPTION_ENGINE, else the platform default)"
     )
     
     parser.add_argument(
@@ -231,6 +238,8 @@ def main(args=None):
     config_kwargs = {}
     if args.model:
         config_kwargs['whisper_model'] = args.model
+    if args.engine:
+        config_kwargs['transcription_engine'] = args.engine
     if args.language:
         config_kwargs['language'] = args.language
     if args.format:

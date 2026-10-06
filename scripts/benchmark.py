@@ -189,6 +189,14 @@ def active_engine_name(service: TranscriptionService) -> str:
     return "parakeet" if isinstance(asr_engine, ParakeetEngine) else "whisper"
 
 
+def active_model_name(service: TranscriptionService) -> str:
+    """Model the service's ASR engine will actually load."""
+    asr_engine = service.transcriber.transcription_engine
+    if isinstance(asr_engine, ParakeetEngine):
+        return asr_engine.parakeet_model_id
+    return asr_engine.whisper_model_size
+
+
 def run_pipeline(service: TranscriptionService, audio_path: Path) -> Tuple[dict, float]:
     t0 = time.time()
     result = service.transcribe_file(str(audio_path))
@@ -206,7 +214,8 @@ def main(argv: list[str] | None = None) -> int:
                         help="ASR engine override (defaults to TRANSCRIPTION_ENGINE env, else the "
                              "platform default: parakeet on Apple Silicon, whisper elsewhere)")
     parser.add_argument("--model", default=None,
-                        help="Override the whisper model size (e.g. tiny, base, large-v3-turbo)")
+                        help="Whisper model (e.g. tiny, base, large-v3-turbo); selects Whisper "
+                             "unless --engine is given")
     parser.add_argument("--reference", default=None,
                         help="Path to a reference VTT file. If supplied, the URL argument is "
                              "treated as a local audio file and yt-dlp is not called.")
@@ -252,7 +261,7 @@ def main(argv: list[str] | None = None) -> int:
         "video_title": meta.get("title"),
         "video_duration_s": meta.get("duration"),
         "engine": engine,
-        "model": args.model or os.getenv("WHISPER_MODEL") or "default",
+        "model": active_model_name(service),
         "ref_source": (
             meta.get("ref_source") if not args.reference else f"file:{args.reference}"
         ) or "unknown",

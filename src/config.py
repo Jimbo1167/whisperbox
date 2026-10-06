@@ -58,7 +58,9 @@ class Config:
             **overrides: Optional keyword arguments to override env values.
                 Supported keys: whisper_model, language, output_format,
                 include_diarization, diarization_model, force_cpu,
-                transcription_engine, parakeet_model
+                transcription_engine, parakeet_model. A whisper_model
+                override selects the Whisper engine unless the engine was
+                chosen explicitly.
         """
         if env_file:
             load_env_file(env_file)
@@ -142,6 +144,28 @@ class Config:
             self.transcription_engine_defaulted = False
         if 'parakeet_model' in overrides:
             self.parakeet_model = overrides['parakeet_model']
+
+        # An explicit Whisper model request (--model) means Whisper, unless an
+        # engine was also chosen explicitly (--engine or TRANSCRIPTION_ENGINE).
+        if 'whisper_model' in overrides and self.transcription_engine != "whisper":
+            if self.transcription_engine_defaulted:
+                logger.info(
+                    f"Whisper model {self.whisper_model_size} requested; using Whisper "
+                    f"instead of the default {self.transcription_engine} engine"
+                )
+                self.transcription_engine = "whisper"
+                self.transcription_engine_defaulted = False
+            else:
+                logger.warning(
+                    f"Whisper model {self.whisper_model_size} has no effect with the "
+                    f"{self.transcription_engine} engine; set PARAKEET_MODEL to choose "
+                    f"its model"
+                )
+        if 'language' in overrides and self.transcription_engine == "parakeet":
+            logger.warning(
+                f"The parakeet engine detects the language itself; ignoring "
+                f"language {self.language}"
+            )
 
         logger.debug(f"Configuration loaded: {self.to_dict()}")
 
