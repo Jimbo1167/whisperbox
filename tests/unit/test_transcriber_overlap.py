@@ -6,8 +6,10 @@ before ``audio_processor.get_audio_path`` is called, so total wall time
 collapses to ``max(ffmpeg, model_load) + max(transcribe, diarize)`` rather
 than ``ffmpeg + model_load + max(transcribe, diarize)``.
 
-These tests stub the engines and the audio processor with sleeps to make the
-timing observable without booting a real Whisper/pyannote model.
+These tests stub the engines and the audio processor without booting a real
+Whisper/pyannote model. Overlap is proven with a barrier rather than wall-clock
+limits: each stage blocks until every stage is running at once, so run
+sequentially the barrier times out and breaks, however slow the machine.
 """
 
 from __future__ import annotations
@@ -15,10 +17,7 @@ from __future__ import annotations
 import os
 import sys
 import threading
-import time
-import types
-from typing import List
-from unittest.mock import MagicMock
+from typing import List, Optional
 
 import pytest
 
@@ -28,32 +27,30 @@ from src.config import Config
 from src.transcriber import Transcriber
 
 
-SLEEP = 0.15  # short enough that the suite stays fast, long enough to measure
-
-
-def _build_transcriber(*, include_diarization: bool) -> Transcriber:
+def _build_transcriber(
+    *, include_diarization: bool, barrier: Optional[threading.Barrier] = None
+) -> Transcriber:
     config = Config(include_diarization=include_diarization, output_format="txt")
     # test_mode=True wires mock engines that don't touch real models. We then
-    # replace specific methods to control timing.
+    # replace specific methods to observe the stages.
     transcriber = Transcriber(config, test_mode=True)
 
-    def slow_get_audio_path(_input_path: str):
-        time.sleep(SLEEP)
+    def stage():
+        if barrier is not None:
+            barrier.wait()
+
+    def get_audio_path(_input_path: str):
+        stage()
         return ("/tmp/fake_audio.wav", False)
 
-    transcriber.audio_processor.get_audio_path = slow_get_audio_path  # type: ignore[attr-defined]
-
-    def slow_ensure_transcription_load():
-        time.sleep(SLEEP)
-
-    def slow_ensure_diarization_load(force=False):
-        time.sleep(SLEEP)
-
-    transcriber.transcription_engine.ensure_model_loaded = slow_ensure_transcription_load  # type: ignore[attr-defined]
-    transcriber.diarization_engine.ensure_model_loaded = slow_ensure_diarization_load  # type: ignore[attr-defined]
+    transcriber.audio_processor.get_audio_path = get_audio_path  # type: ignore[attr-defined]
+    transcriber.transcription_engine.ensure_model_loaded = stage  # type: ignore[attr-defined]
+    transcriber.diarization_engine.ensure_model_loaded = (  # type: ignore[attr-defined]
+        lambda force=False: stage()
+    )
 
     # Replace the heavy transcribe/diarize calls with instant fakes so we
-    # measure only the load-vs-extract overlap.
+    # observe only the load-vs-extract overlap.
     transcriber.transcription_engine.transcribe = lambda _p: [  # type: ignore[attr-defined]
         {"start": 0.0, "end": 1.0, "text": "hello"}
     ]
@@ -64,34 +61,23 @@ def _build_transcriber(*, include_diarization: bool) -> Transcriber:
 
 
 def test_audio_extract_overlaps_model_load_with_diarization():
-    transcriber = _build_transcriber(include_diarization=True)
+    # Extraction, transcription-model load and diarization-model load.
+    barrier = threading.Barrier(3, timeout=5)
+    transcriber = _build_transcriber(include_diarization=True, barrier=barrier)
 
-    start = time.perf_counter()
     transcriber.transcribe("ignored_path.mp4")
-    elapsed = time.perf_counter() - start
 
-    # If overlap works, total ~= max(SLEEP, SLEEP) + ~tiny stub work = ~SLEEP.
-    # If sequential, total >= SLEEP * 3 (extract + transcribe_load + diarize_load).
-    # Use 2 * SLEEP as a generous-but-strict ceiling.
-    assert elapsed < 2 * SLEEP, (
-        f"Expected audio extraction to overlap with model loads "
-        f"(elapsed={elapsed:.3f}s, single-stage SLEEP={SLEEP:.3f}s)"
-    )
+    assert not barrier.broken
 
 
 def test_audio_extract_overlaps_model_load_without_diarization():
-    transcriber = _build_transcriber(include_diarization=False)
+    # Extraction and transcription-model load only.
+    barrier = threading.Barrier(2, timeout=5)
+    transcriber = _build_transcriber(include_diarization=False, barrier=barrier)
 
-    start = time.perf_counter()
     transcriber.transcribe("ignored_path.mp4")
-    elapsed = time.perf_counter() - start
 
-    # Two stages overlap: ffmpeg and transcription-engine load.
-    # Sequential would be ~2*SLEEP; overlapped is ~SLEEP.
-    assert elapsed < 1.6 * SLEEP, (
-        f"Expected audio extraction to overlap with transcription model load "
-        f"(elapsed={elapsed:.3f}s, single-stage SLEEP={SLEEP:.3f}s)"
-    )
+    assert not barrier.broken
 
 
 def test_model_load_error_propagates():

@@ -176,3 +176,21 @@ class TestReportedEngine:
     def test_explicit_engine_flag_is_reported(self, apple_silicon_default, run_benchmark):
         report, _ = run_benchmark("--engine", "whisper")
         assert report["engine"] == "whisper"
+
+    def test_parakeet_run_reports_the_parakeet_model(
+        self, monkeypatch, apple_silicon_default, run_benchmark
+    ):
+        monkeypatch.setitem(sys.modules, "parakeet_mlx", types.ModuleType("parakeet_mlx"))
+        monkeypatch.setenv("WHISPER_MODEL", "large-v3-turbo")
+        monkeypatch.setenv("PARAKEET_MODEL", "mlx-community/parakeet-tdt-0.6b-v3")
+        report, _ = run_benchmark()
+        assert report["model"] == "mlx-community/parakeet-tdt-0.6b-v3"
+
+    def test_whisper_run_reports_the_whisper_model(self, monkeypatch, run_benchmark):
+        monkeypatch.setenv("WHISPER_MODEL", "small")
+        report, _ = run_benchmark("--engine", "whisper")
+        assert report["model"] == "small"
+
+    def test_model_flag_reports_that_model(self, run_benchmark):
+        report, _ = run_benchmark("--engine", "whisper", "--model", "tiny")
+        assert report["model"] == "tiny"

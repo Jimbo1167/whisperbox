@@ -58,11 +58,7 @@ def main():
     print("Creating test video with audio...")
     create_test_video(str(fixtures_dir / "test_video.mp4"))
     
-    # 2. Video without audio
-    print("Creating test video without audio...")
-    create_test_video(str(fixtures_dir / "test_video_no_audio.mp4"), with_audio=False)
-    
-    # 3. Basic WAV file
+    # 2. Basic WAV file
     print("Creating test WAV file...")
     create_test_wav(str(fixtures_dir / "test_audio.wav"))
     

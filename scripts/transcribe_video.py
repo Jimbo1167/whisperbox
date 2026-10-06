@@ -16,7 +16,7 @@ from pathlib import Path
 # Add the parent directory to the path so we can import the src package
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from src.config import Config
+from src.config import OUTPUT_FORMATS, Config, load_env_file
 from src.server_client import transcribe_with_server_fallback
 
 logger = logging.getLogger(__name__)
@@ -46,7 +46,7 @@ def main():
                        help='Path to the video or audio file to transcribe')
     parser.add_argument('--output', '-o', 
                        help='Output path for the transcript (default: transcripts/<input_filename>.<format>)')
-    parser.add_argument('--format', '-f', choices=['txt', 'srt', 'vtt', 'json', 'pretty'], 
+    parser.add_argument('--format', '-f', choices=OUTPUT_FORMATS,
                        help='Output format (default: from config)')
     parser.add_argument('--no-diarization', action='store_true',
                        help='Disable speaker diarization')
@@ -67,17 +67,20 @@ def main():
     start_time = time.time()
     
     logger.info("\nInitializing transcriber...")
-    config = Config(".env")  # Explicitly load from .env file
-    
-    # Override config with command line arguments
+    load_env_file()
+
+    # Command-line arguments override the config (as Config overrides, so
+    # --model selects Whisper exactly as it does for the other commands)
+    overrides = {}
     if args.format:
-        config.output_format = args.format
+        overrides['output_format'] = args.format
     if args.no_diarization:
-        config.include_diarization = False
+        overrides['include_diarization'] = False
     if args.model:
-        config.whisper_model_size = args.model
+        overrides['whisper_model'] = args.model
     if args.language:
-        config.language = args.language
+        overrides['language'] = args.language
+    config = Config(**overrides)
     
     # Validate the configuration
     if not config.validate():

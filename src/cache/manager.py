@@ -6,6 +6,7 @@ transcription results, and diarization results.
 """
 
 import os
+import re
 import json
 import time
 import hashlib
@@ -17,6 +18,15 @@ from pathlib import Path
 from ..config import Config
 
 logger = logging.getLogger(__name__)
+
+def _slug(text: str) -> str:
+    """Return a filesystem-safe slug for cache keys and filenames.
+
+    HF model ids contain '/'; local paths contain '/' (and on macOS, spaces).
+    Both must produce a single safe token.
+    """
+    return re.sub(r"[^A-Za-z0-9._-]", "_", text)
+
 
 class CacheManager:
     """
@@ -326,18 +336,28 @@ class CacheManager:
         except Exception as e:
             logger.warning(f"Error caching transcription results: {e}")
     
-    def get_cached_diarization(self, audio_path: str) -> Optional[List[Dict[str, Any]]]:
+    @staticmethod
+    def _diarization_prefix(model_id: str) -> str:
+        return f"diarization-{_slug(model_id)}"
+
+    def get_cached_diarization(
+        self, audio_path: str, model_id: str = "pyannote"
+    ) -> Optional[List[Dict[str, Any]]]:
         """
         Get cached diarization results if they exist.
         
         Args:
             audio_path: Path to the audio file
+            model_id: Diarization model (DIARIZATION_MODEL); results from a
+                different model are never returned
             
         Returns:
             Cached diarization results if they exist, None otherwise
         """
         # Generate cache key
-        cache_key = self._generate_cache_key(audio_path, prefix="diarization")
+        cache_key = self._generate_cache_key(
+            audio_path, prefix=self._diarization_prefix(model_id)
+        )
         
         # Return None if file doesn't exist
         if cache_key is None:
@@ -357,16 +377,25 @@ class CacheManager:
         
         return None
     
-    def cache_diarization(self, audio_path: str, diarization_results: List[Dict[str, Any]]) -> None:
+    def cache_diarization(
+        self,
+        audio_path: str,
+        diarization_results: List[Dict[str, Any]],
+        model_id: str = "pyannote",
+    ) -> None:
         """
         Cache diarization results.
         
         Args:
             audio_path: Path to the audio file
             diarization_results: Diarization results to cache
+            model_id: Diarization model (must match the value passed to
+                get_cached_diarization)
         """
         # Generate cache key
-        cache_key = self._generate_cache_key(audio_path, prefix="diarization")
+        cache_key = self._generate_cache_key(
+            audio_path, prefix=self._diarization_prefix(model_id)
+        )
         cache_path = self._get_cache_path(cache_key, "diarization")
         
         # Save the diarization results to the cache

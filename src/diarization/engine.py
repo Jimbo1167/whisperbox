@@ -218,7 +218,9 @@ class DiarizationEngine:
 
         # Check if we have cached results
         if self.cache_manager:
-            cached_diarization = self.cache_manager.get_cached_diarization(audio_path)
+            cached_diarization = self.cache_manager.get_cached_diarization(
+                audio_path, model_id=self.config.diarization_model
+            )
             if cached_diarization:
                 return cached_diarization
 
@@ -256,7 +258,9 @@ class DiarizationEngine:
 
             # Cache the results if caching is enabled
             if self.cache_manager:
-                self.cache_manager.cache_diarization(audio_path, segments)
+                self.cache_manager.cache_diarization(
+                    audio_path, segments, model_id=self.config.diarization_model
+                )
 
             return segments
 

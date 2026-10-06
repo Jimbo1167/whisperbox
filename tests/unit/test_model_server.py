@@ -44,10 +44,12 @@ class FakeService:
         self.diarization_error = diarization_error
         self.fail = fail
         self.calls = []
+        self.input_paths = []
 
     def transcribe_file(self, input_path, output_format=None,
                         progress_callback=None, include_diarization=None):
         self.calls.append({"include_diarization": include_diarization})
+        self.input_paths.append(input_path)
         if self.fail:
             raise Exception("simulated pipeline failure")
         out = self.tmp_path / f"result-{uuid.uuid4().hex}.txt"
@@ -57,6 +59,14 @@ class FakeService:
             "preview_text": "hello world",
             "output_format": output_format,
             "output_file": str(out),
+            "processing_time": 0.01,
+            "diarization_error": self.diarization_error,
+        }
+
+    def transcribe_existing_audio(self, audio_path, include_diarization=None):
+        self.calls.append({"include_diarization": include_diarization})
+        return {
+            "segments": [(0.0, 1.0, "hello world", "")],
             "processing_time": 0.01,
             "diarization_error": self.diarization_error,
         }
@@ -78,10 +88,13 @@ def server(tmp_path, monkeypatch):
     httpd = model_server.ThreadedHTTPServer(
         ("127.0.0.1", port), model_server.ModelRequestHandler
     )
-    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread = threading.Thread(
+        target=httpd.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True
+    )
     thread.start()
     yield f"http://127.0.0.1:{port}", fake_service
     httpd.shutdown()
+    httpd.server_close()
 
 
 def _submit_and_wait(url, data, deadline=10.0):
@@ -149,3 +162,92 @@ def test_service_exception_still_fails_job(server):
 
     assert job["status"] == "failed"
     assert "simulated pipeline failure" in job["error"]
+
+
+# --- hardening ---------------------------------------------------------------
+
+
+@pytest.mark.parametrize("endpoint", ["/transcribe", "/api/transcribe-sync"])
+def test_oversized_upload_is_refused(server, monkeypatch, endpoint):
+    url, fake_service = server
+    monkeypatch.setattr(model_server, "MAX_UPLOAD_SIZE", 10)
+
+    response = requests.post(
+        # Big enough that the client is still sending when the server answers;
+        # closing with the body unread used to reset the connection.
+        f"{url}{endpoint}", files={"file": ("audio.wav", io.BytesIO(b"\x00" * (2 << 20)))}
+    )
+
+    assert response.status_code == 413
+    assert fake_service.calls == []
+
+
+def test_transcript_download_cannot_escape_the_transcripts_dir(server, tmp_path):
+    import http.client
+
+    url, _ = server
+    (tmp_path / "secret.txt").write_text("do not serve", encoding="utf-8")
+    host, port = url.removeprefix("http://").split(":")
+
+    conn = http.client.HTTPConnection(host, int(port), timeout=5)
+    conn.request("GET", "/transcripts/../secret.txt")  # sent verbatim
+    response = conn.getresponse()
+    body = response.read()
+    conn.close()
+
+    assert response.status == 404
+    assert b"do not serve" not in body
+
+
+def test_uploaded_temp_file_is_removed_after_the_job(server):
+    url, fake_service = server
+    _submit_and_wait(url, {"diarize": "false"})
+
+    (temp_path,) = fake_service.input_paths
+    end = time.time() + 5
+    while Path(temp_path).exists() and time.time() < end:
+        time.sleep(0.02)
+    assert not Path(temp_path).exists()
+
+
+@pytest.mark.parametrize("data, expected", [
+    ({"diarize": "false"}, False),
+    ({"diarize": "true"}, True),
+    ({}, None),  # absent: the service applies the server default
+])
+def test_sync_endpoint_forwards_the_diarize_field(server, data, expected):
+    url, fake_service = server
+
+    response = requests.post(
+        f"{url}/api/transcribe-sync",
+        files={"file": ("audio.wav", io.BytesIO(b"\x00\x01"))},
+        data=data,
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"text": "hello world"}
+    assert fake_service.calls == [{"include_diarization": expected}]
+
+
+def test_oversized_upload_drain_is_bounded(server, monkeypatch):
+    """A client that declares a huge body and stalls can't pin a handler."""
+    import socket
+
+    url, fake_service = server
+    monkeypatch.setattr(model_server, "MAX_UPLOAD_SIZE", 10)
+    monkeypatch.setattr(model_server, "DRAIN_TIMEOUT", 0.3)
+    host, port = url.removeprefix("http://").split(":")
+
+    with socket.create_connection((host, int(port)), timeout=5) as sock:
+        sock.sendall(
+            b"POST /api/transcribe HTTP/1.1\r\nHost: x\r\n"
+            b"Content-Type: multipart/form-data; boundary=b\r\n"
+            b"Content-Length: 10000000000\r\n\r\n" + b"\x00" * 1000
+        )
+        response = b""
+        while chunk := sock.recv(65536):  # ends when the server closes
+            response += chunk
+
+    assert response.startswith(b"HTTP/1.0 413")
+    assert b"Content-Length:" in response
+    assert fake_service.calls == []

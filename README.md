@@ -5,7 +5,7 @@ A Python tool for transcribing videos and audio files with speaker diarization. 
 ## Current State
 
 - Core transcription flow is shared across CLI and server through `src/service.py`
-- Test suite is green on a fresh checkout: `208 passed`
+- The test suite runs on a fresh checkout without models or network access (`make test`; see [Running the tests](#running-the-tests))
 - A simple browser UI is available from the local model server for drag-and-drop uploads
 - Output files are written to `transcripts/`
 
@@ -13,15 +13,15 @@ A Python tool for transcribing videos and audio files with speaker diarization. 
 
 - Support for both video and audio files (WAV processed directly, other formats converted)
 - Two ASR engines: Parakeet via `parakeet-mlx` (default on Apple Silicon) and Whisper via `faster-whisper` (default everywhere else)
-- Speaker diarization via pyannote.audio
+- Optional speaker diarization via pyannote.audio (`--diarize`)
 - Multiple output formats: txt, pretty, srt, vtt, vtt-voice, json, json3
 - Streaming transcription for large files with minimal memory usage
 - Batch processing of multiple files
 - Caching of audio extraction, transcription, and diarization results
 - Progress reporting (human-readable or machine-readable JSONL events)
 - Model server with browser UI for drag-and-drop uploads
-- Hardware acceleration support (CUDA, MPS)
-- Configurable via environment variables or `.env` file
+- Hardware acceleration: Parakeet runs on the Apple GPU (MLX); Whisper uses CUDA when available, otherwise the CPU
+- Configurable via a `.env` file or environment variables (the environment wins)
 - Docker support and an AWS deployment guide
 
 ## Architecture
@@ -43,9 +43,8 @@ whisperbox/
 ├── scripts/           # CLI entry points and model server
 ├── web/               # Browser UI served by the model server
 ├── tests/
-│   ├── unit/          # Unit tests
-│   ├── integration/   # Integration tests
-│   ├── fixtures/      # Test fixtures
+│   ├── unit/          # Unit tests (fake models; no downloads)
+│   ├── fixtures/      # Generated test media
 ```
 
 ### Key Components
@@ -73,10 +72,12 @@ CACHE_EXPIRATION=604800  # Cache expiration in seconds (default: 7 days)
 MAX_CACHE_SIZE=10737418240  # Maximum cache size in bytes (default: 10GB)
 ```
 
+The cache lives in `~/.cache/whisperbox/`. See [Caching](docs/user_guide/index.md#caching) for what the cache keys cover and how to clear it.
+
 ## Supported Formats
 
 ### Input Formats
-- Video: mov, mp4, etc. (any format supported by MoviePy)
+- Video: mov, mp4, etc. (anything FFmpeg can decode; audio is extracted with the `ffmpeg` binary that `imageio-ffmpeg` provides)
 - Audio: wav (direct processing), mp3, m4a, aac (auto-converted to wav)
 
 ### Output Formats
@@ -106,10 +107,12 @@ Choose your model in the `.env` file:
 WHISPER_MODEL=large-v3-turbo  # Common options: tiny, base, small, medium, large-v3, large-v3-turbo
 ```
 
+Any model name faster-whisper accepts works (for example `distil-large-v3`, a Hugging Face repo id, or a local path). `WHISPER_MODEL` only applies when the Whisper engine runs. On Apple Silicon, where Parakeet is the default, set `TRANSCRIPTION_ENGINE=whisper`, or pass `--model` for a single run (an explicit `--model` selects Whisper).
+
 ## Requirements
 
 - Python 3.10+ (developed on 3.13; Docker image uses 3.12)
-- FFmpeg (for video/audio processing)
+- FFmpeg: the `ffmpeg` binary for audio extraction (`imageio-ffmpeg` uses its bundled copy when it has one, otherwise the one on your `PATH`), and the FFmpeg shared libraries (major version 4–9) for diarization, which decodes audio through torchcodec
 - PyTorch — not in `requirements.txt`; installed separately via `make install-torch` (CPU wheels) or your own CUDA build
 - Other dependencies listed in requirements.txt
 
@@ -157,18 +160,18 @@ make docker-run
 
 ## Configuration
 
-Edit the `.env` file to configure:
+Edit the `.env` file to configure the settings below. Every entry point that uses these settings reads the project's `.env`, wherever you run it from. Variables already set in your environment take precedence, whether exported or set inline (`INCLUDE_DIARIZATION=true python transcribe_video.py ...`). The full list is in the [user guide](docs/user_guide/index.md#configuration).
 
 - `HF_TOKEN`: Your HuggingFace token for accessing models
 - `TRANSCRIPTION_ENGINE`: ASR engine to use (`whisper` or `parakeet`; default `parakeet` on Apple Silicon, `whisper` elsewhere). See [Transcription engines](#transcription-engines) below.
-- `WHISPER_MODEL`: Whisper model size (tiny, base, small, medium, large-v2, large-v3, large-v3-turbo; default: large-v3-turbo)
+- `WHISPER_MODEL`: Whisper model (any faster-whisper name, e.g. tiny, base, small, medium, large-v3, large-v3-turbo; default: large-v3-turbo)
 - `WHISPER_BEAM_SIZE`, `WHISPER_CPU_THREADS`, `WHISPER_BATCH_SIZE`: Whisper speed/accuracy tuning (see `.env.example`)
-- `PARAKEET_MODEL`: HF model id or local path to MLX-format weights (default `mlx-community/parakeet-tdt-0.6b-v3`). Only used when `TRANSCRIPTION_ENGINE=parakeet`.
-- `LANGUAGE`: Target language for transcription (default: en)
+- `PARAKEET_MODEL`: HF model id or local path to MLX-format weights (default `mlx-community/parakeet-tdt-0.6b-v3`). Only used when the Parakeet engine runs.
+- `LANGUAGE`: Target language for Whisper (default: en). Parakeet detects the language itself.
 - `OUTPUT_FORMAT`: Transcript format (txt, pretty, srt, vtt, vtt-voice, json, json3)
-- `INCLUDE_DIARIZATION`: Enable/disable speaker diarization (default: false)
+- `INCLUDE_DIARIZATION`: Default diarization setting for the model server and `transcribe_video.py` / `make transcribe` (default: false). The `transcribe`, `stream`, `batch` and `client transcribe` commands diarize only when you pass `--diarize`.
 - `DIARIZATION_MODEL`: pyannote model id (default: pyannote/speaker-diarization-community-1)
-- `FORCE_CPU`: Force CPU for Whisper even when a GPU is available (default: false)
+- `FORCE_CPU`: Run Whisper and pyannote diarization on the CPU even when a GPU is available (default: false; `.env.example` sets it to true). No effect on Parakeet.
 - `CACHE_ENABLED`: Enable/disable caching system
 - `CACHE_EXPIRATION`: Cache expiration time in seconds
 - `MAX_CACHE_SIZE`: Maximum cache size in bytes
@@ -208,10 +211,13 @@ export PARAKEET_MODEL=/path/to/local/mlx-checkpoint
 
 #### Caveats
 
-- **Apple Silicon only.** Setting `TRANSCRIPTION_ENGINE=parakeet` on Linux, Docker, or Intel macOS is rejected at config validation. The `parakeet-mlx` dependency in `requirements.txt` carries a platform marker so non-Apple-Silicon installs skip it entirely.
-- **`FORCE_CPU` is Whisper-only.** MLX runs on Apple Silicon with no equivalent knob; if `FORCE_CPU=true` is set with `engine=parakeet`, a warning is logged and the flag is ignored.
-- **Streaming is Whisper-only.** Calling streaming entry points with `engine=parakeet` raises `NotImplementedError`. Use the batch `transcribe()` path.
+- **Apple Silicon only.** The `parakeet-mlx` dependency in `requirements.txt` carries a platform marker, so Linux, Docker and Intel macOS installs skip it. Leave `TRANSCRIPTION_ENGINE` unset (or `whisper`) there: an explicit `parakeet` fails when the model loads (`No module named 'mlx'`), and `scripts/transcribe_video.py` rejects it up front.
+- **`FORCE_CPU` has no effect on Parakeet.** MLX runs on Apple Silicon with no equivalent setting; if `FORCE_CPU=true` is set with `engine=parakeet`, a warning is logged and the flag is ignored for transcription. It still applies to diarization.
+- **Streaming is Whisper-only.** `stream` and `batch --streaming` always run Whisper; if you chose Parakeet explicitly (`--engine` or `TRANSCRIPTION_ENGINE`), they log a warning first.
+- **Language and model.** Parakeet detects the language itself, so `LANGUAGE` and `--language` are ignored (an explicit `--language` logs a warning). Its model is set by `PARAKEET_MODEL`. `--model` names a Whisper model and selects Whisper for that run.
 - **Handy weights are not compatible.** Handy ships INT8 ONNX weights; `parakeet-mlx` requires MLX-format weights. Users wanting to reuse Handy's weights would need a different runtime (e.g. `onnx-asr`) — out of scope here.
+
+The [engine comparison](docs/user_guide/index.md#transcription-engines) in the user guide lists the differences side by side. To pick an engine for a single run, pass `--engine whisper|parakeet` to `transcribe` or `batch`.
 
 ## Usage
 
@@ -227,7 +233,7 @@ Process an audio file (WAV files are processed directly):
 python -m scripts.transcribe transcribe path/to/your/audio.wav
 ```
 
-Enable diarization for a one-off run (off by default; the `--diarize` flag is opt-in — to force it off for every run, set `INCLUDE_DIARIZATION=false` in `.env`):
+Enable diarization for a run. It is off unless you pass `--diarize`; `INCLUDE_DIARIZATION` in `.env` does not turn it on for this command. Diarization needs `HF_TOKEN` and working FFmpeg libraries (see [Speaker diarization](docs/user_guide/index.md#speaker-diarization)):
 ```bash
 python -m scripts.transcribe transcribe path/to/your/audio.wav --diarize
 ```
@@ -241,6 +247,8 @@ python -m scripts.model_server
 ```
 
 Then open `http://localhost:8000` in your browser and drag a file onto the page.
+
+`make server` starts the same server bound to `0.0.0.0`, so other machines on your network can reach it. The server has no authentication, and its JSON `/transcribe` endpoint transcribes any file path on the server's filesystem. Only use `make server` on a trusted network. The [CLI guide](docs/user_guide/cli.md#model-server-model_serverpy) documents the server and its HTTP API.
 
 ### Streaming Transcription (Low Memory Usage)
 
@@ -282,12 +290,13 @@ python -m scripts.transcribe transcribe path/to/video.mp4 --format srt
 python -m scripts.transcribe transcribe path/to/your/file.mp4 -o path/to/output.txt
 ```
 
-### Resume Partial Processing
+### Batch Processing
 
-If you've already extracted the audio:
 ```bash
-python -m scripts.transcribe_video path/to/your/audio.wav
+python -m scripts.transcribe batch "path/to/directory/*.mp4" -f srt
 ```
+
+Quote the glob pattern; the command takes one pattern. It exits with status 1 unless every matched file was transcribed.
 
 ## Development
 
@@ -316,12 +325,20 @@ pip install -r requirements-dev.txt
 python -m pytest tests/
 ```
 
+### Running the tests
+
+`make test` (or `pytest`; `pytest.ini` sets the test paths) runs the suite in a few seconds. It uses fake models, so it needs no model downloads, network access or `HF_TOKEN`, and it never reads your `.env` or touches `~/.cache`. One test, marked `env`, checks that this machine's torchcodec can decode with the system FFmpeg. Skip it where the FFmpeg libraries aren't installed:
+
+```bash
+pytest -m "not env"
+```
+
 ## Performance Considerations
 
 - **Streaming Mode**: Use streaming transcription for large files to reduce memory usage
 - **Caching**: Enable caching for improved performance when processing the same files multiple times
 - **Model Selection**: Choose the appropriate model size based on your accuracy needs and hardware capabilities
-- **Hardware Acceleration**: Use CUDA (NVIDIA) or MPS (Apple Silicon) for faster processing
+- **Hardware Acceleration**: On Apple Silicon, Parakeet runs on the GPU through MLX. Whisper runs on CUDA (NVIDIA) when available and otherwise on the CPU; it does not use Apple's GPU (MPS)
 - **Memory Usage**: Large files may require significant memory, especially with larger models
 - **Containerization**: Use Docker for consistent deployment across environments
 - **Cloud Deployment**: Deploy to AWS for scalable processing of large volumes of media
@@ -331,7 +348,7 @@ python -m pytest tests/
 - Large video files may require significant memory
 - Some hardware acceleration features require specific hardware/drivers
 - Non-WAV audio files will be converted to WAV before processing
-- Diarization requires a HuggingFace token (`HF_TOKEN`) with access to the pyannote model set in `DIARIZATION_MODEL`
+- Diarization requires a HuggingFace token (`HF_TOKEN`) with access to the pyannote model set in `DIARIZATION_MODEL`, and FFmpeg shared libraries that torchcodec can load (see [Troubleshooting](docs/user_guide/index.md#troubleshooting))
 
 ## Contributing
 
@@ -367,6 +384,6 @@ SOFTWARE.
 
 ## Acknowledgments
 
-- OpenAI's Whisper for transcription
+- OpenAI's Whisper (via faster-whisper) and NVIDIA's Parakeet (via parakeet-mlx) for transcription
 - Pyannote.audio for speaker diarization
-- MoviePy for video/audio processing
+- FFmpeg (via imageio-ffmpeg) for audio extraction

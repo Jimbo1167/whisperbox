@@ -10,10 +10,8 @@ from __future__ import annotations
 
 import json
 import sys
-import wave
 from pathlib import Path
 
-import numpy as np
 import pytest
 from click.testing import CliRunner
 
@@ -73,17 +71,6 @@ def fake_transcriber(monkeypatch):
     # Keep the test independent of the developer's .env.
     monkeypatch.setenv("INCLUDE_DIARIZATION", "false")
     return FakeTranscriber
-
-
-@pytest.fixture
-def wav_path(tmp_path):
-    path = tmp_path / "clip.wav"
-    with wave.open(str(path), "wb") as f:
-        f.setnchannels(1)
-        f.setsampwidth(2)
-        f.setframerate(16000)
-        f.writeframes(np.zeros(16000, dtype=np.int16).tobytes())
-    return path
 
 
 def test_stream_words_json_writes_word_timestamps(wav_path, tmp_path):
@@ -160,3 +147,81 @@ def test_server_passes_args_to_model_server_main(monkeypatch):
     assert result.exit_code == 0, result.output
     assert calls == {"config": "custom.env", "host": "localhost", "port": 9123}
 
+
+
+class _Word:
+    def __init__(self, start, end, word):
+        self.start, self.end, self.word = start, end, word
+
+
+class _Segment:
+    def __init__(self, start, end, text, words):
+        self.start, self.end, self.text, self.words = start, end, text, words
+
+
+class _RecordingWhisper:
+    """Fake faster-whisper model: records its kwargs, honors word_timestamps."""
+
+    calls: list = []
+
+    def __init__(self, *args, **kwargs):
+        pass
+
+    def transcribe(self, audio, **kwargs):
+        type(self).calls.append(kwargs)
+        words = (
+            [_Word(0.0, 0.4, " Hello"), _Word(0.4, 0.9, " world.")]
+            if kwargs.get("word_timestamps") else []
+        )
+        return iter([_Segment(0.0, 0.9, "Hello world.", words)]), None
+
+
+def test_stream_words_reach_json_through_the_real_pipeline(wav_path, tmp_path, monkeypatch):
+    """--words through the real Transcriber, WhisperEngine and StreamingTranscriber.
+
+    The tests above fake the whole Transcriber, so dropping word_timestamps
+    anywhere between the CLI and faster-whisper went unnoticed.
+    """
+    import src.transcription.engine as engine_module
+    from src.transcriber import Transcriber
+
+    _RecordingWhisper.calls = []
+    monkeypatch.setattr(stream_transcribe, "Transcriber", Transcriber)
+    monkeypatch.setattr(engine_module, "WhisperModel", _RecordingWhisper)
+    monkeypatch.setenv("CACHE_ENABLED", "false")
+    out = tmp_path / "out.json"
+
+    result = CliRunner().invoke(
+        cli, ["stream", str(wav_path), "--words", "-f", "json", "-o", str(out)]
+    )
+
+    assert result.exit_code == 0, result.output
+    assert _RecordingWhisper.calls
+    assert all(call["word_timestamps"] is True for call in _RecordingWhisper.calls)
+    (segment,) = json.loads(out.read_text(encoding="utf-8"))
+    assert [w["word"] for w in segment["words"]] == [" Hello", " world."]
+
+
+def test_failure_mid_stream_saves_partial_transcript_but_exits_nonzero(
+    wav_path, tmp_path, monkeypatch
+):
+    def one_segment_then_fail(self, input_path, word_timestamps=False):
+        yield {"start": 0.0, "end": 0.9, "text": "Hello world."}
+        raise RuntimeError("decoder crashed")
+
+    monkeypatch.setattr(FakeTranscriber, "transcribe_stream", one_segment_then_fail)
+    out = tmp_path / "out.txt"
+
+    result = CliRunner().invoke(cli, ["stream", str(wav_path), "-f", "txt", "-o", str(out)])
+
+    assert result.exit_code == 1
+    assert "Hello world." in out.read_text(encoding="utf-8")
+
+
+def test_stream_without_diarization_has_no_speaker_labels(wav_path, tmp_path):
+    out = tmp_path / "out.txt"
+
+    result = CliRunner().invoke(cli, ["stream", str(wav_path), "-f", "txt", "-o", str(out)])
+
+    assert result.exit_code == 0, result.output
+    assert "SPEAKER" not in out.read_text(encoding="utf-8")

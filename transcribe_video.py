@@ -1,5 +1,5 @@
 import sys
-from src.config import Config
+from src.config import Config, load_env_file
 from src.server_client import transcribe_with_server_fallback
 import time
 import argparse
@@ -27,7 +27,8 @@ def main():
     print("\n=== Starting Transcription Process ===")
     start_time = time.time()
     
-    config = Config(".env")  # Explicitly load from .env file
+    load_env_file()
+    config = Config()
 
     # Set default output path if not specified
     if args.output is None:

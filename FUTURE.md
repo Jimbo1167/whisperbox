@@ -6,7 +6,7 @@
 - [x] Add support for batch processing multiple videos (`scripts/transcribe.py batch`)
 - [ ] Implement real-time transcription for live video streams
 - [ ] Add support for custom Whisper model fine-tuning
-- [ ] Implement automatic language detection
+- [ ] Implement automatic language detection (Parakeet detects the language itself; Whisper still uses `LANGUAGE`)
 - [ ] Add support for multi-language transcription in the same video
 - [ ] Implement confidence scores for transcriptions
 
@@ -35,13 +35,15 @@
 ## User Experience
 
 ### CLI Improvements
-- [x] Add progress bars for all processing steps
-- [x] Implement command-line arguments for all options (unified `scripts/transcribe.py` CLI)
+- [ ] Add progress bars for all processing steps (`stream`, `batch` and the model client have them; `transcribe` prints none in its default `pretty` mode, and `--progress jsonl` emits machine-readable events)
+- [x] Unified CLI with subcommands (`scripts/transcribe.py`)
+- [ ] Implement command-line arguments for all options (beam size, CPU threads, cache, `FORCE_CPU`, timeouts and others are still `.env`-only)
 - [ ] Add interactive mode for configuration
 - [ ] Implement resume capability for interrupted processes
 - [ ] Add preview mode for quick sample transcription
 
 ### GUI Features
+- [x] Browser UI for drag-and-drop uploads (served by the model server)
 - [ ] Create a desktop application interface
 - [ ] Add real-time visualization of transcription
 - [ ] Implement waveform display with transcription
@@ -74,7 +76,7 @@
 ## Development Tools
 
 ### Testing
-- [x] Add integration tests with real audio samples (tests/fixtures + tests/integration)
+- [ ] Add integration tests that run real models on real audio (the suite in `tests/unit` uses fake models; `tests/fixtures` holds generated media)
 - [ ] Implement performance benchmarking suite
 - [x] Add automated accuracy testing (`scripts/benchmark.py`, see benchmarks/README.md)
 - [ ] Create test data generation tools
@@ -84,7 +86,7 @@
 - [x] Add API documentation (docs/api/)
 - [x] Create user guides for different use cases (docs/user_guide/)
 - [ ] Add performance tuning guide
-- [ ] Create troubleshooting guide
+- [x] Create troubleshooting guide (docs/user_guide/index.md#troubleshooting)
 - [ ] Add architecture documentation
 
 ## Deployment
@@ -97,7 +99,7 @@
 - [ ] Create deployment automation scripts
 
 ### Monitoring
-- [ ] Add system resource monitoring
+- [ ] Add system resource monitoring (the CLI prints an average CPU/memory summary after each run)
 - [ ] Implement error tracking and reporting
 - [ ] Add performance metrics collection
 - [ ] Create dashboard for system status

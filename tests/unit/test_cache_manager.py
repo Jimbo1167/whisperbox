@@ -215,8 +215,10 @@ def test_cache_diarization(cache_manager, test_audio_file):
     # Cache the diarization results
     cache_manager.cache_diarization(test_audio_file, diarization_results)
     
-    # Get the cache path
-    cache_key = cache_manager._generate_cache_key(test_audio_file, prefix="diarization")
+    # Get the cache path (default model_id="pyannote")
+    cache_key = cache_manager._generate_cache_key(
+        test_audio_file, prefix=cache_manager._diarization_prefix("pyannote")
+    )
     cache_path = cache_manager._get_cache_path(cache_key, "diarization")
     
     # Check that the cache file exists

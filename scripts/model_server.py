@@ -27,7 +27,7 @@ from pathlib import Path
 # Add the parent directory to the path so we can import the package
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from src.config import Config
+from src.config import OUTPUT_FORMATS, Config, load_env_file
 from src.service import TranscriptionService
 
 # Configure logging
@@ -43,6 +43,10 @@ logger = logging.getLogger(__name__)
 
 # Maximum upload size: 500MB
 MAX_UPLOAD_SIZE = 500 * 1024 * 1024
+# After refusing an oversized upload, read at most this much of its body (and
+# wait at most this long for it) so the client sees the 413, not a reset.
+DRAIN_LIMIT = 64 * 1024 * 1024
+DRAIN_TIMEOUT = 10.0
 WEB_ROOT = Path(__file__).resolve().parent.parent / "web"
 TRANSCRIPTS_ROOT = Path.cwd() / "transcripts"
 
@@ -94,6 +98,34 @@ def _parse_multipart(content_type, body):
             else:
                 fields[name] = (None, payload.decode('utf-8', errors='replace'))
     return fields
+
+
+def _device_label() -> str:
+    """Where the loaded ASR engine runs. FORCE_CPU only applies to Whisper."""
+    if service.engine_name == "parakeet":
+        return "MLX (Apple GPU)"
+    return "CPU" if config.force_cpu else "GPU (if available)"
+
+
+def _unservable_request_options(fields) -> Optional[str]:
+    """Explain why a request's model/language can't be served, else None."""
+    if 'model' in fields:
+        _, requested = fields['model']
+        if requested and requested != service.model_name:
+            return (
+                f"This server runs the {service.engine_name} model {service.model_name} "
+                f"and can't switch models per request (asked for {requested}). Omit "
+                f"--model, or restart the server with that model."
+            )
+    if 'language' in fields and service.engine_name == "whisper":
+        _, requested = fields['language']
+        if requested and requested != config.language:
+            return (
+                f"This server transcribes language {config.language!r} and can't "
+                f"switch per request (asked for {requested!r}). Omit --language, or "
+                f"restart the server with LANGUAGE={requested}."
+            )
+    return None
 
 
 def _set_job_state(job_id: str, **updates):
@@ -194,10 +226,12 @@ class ModelRequestHandler(BaseHTTPRequestHandler):
 
     def _send_json_response(self, data: Dict[str, Any], status: int = 200):
         """Send a JSON response."""
+        body = json.dumps(data).encode('utf-8')
         self.send_response(status)
         self.send_header('Content-Type', 'application/json')
+        self.send_header('Content-Length', str(len(body)))
         self.end_headers()
-        self.wfile.write(json.dumps(data).encode('utf-8'))
+        self.wfile.write(body)
 
     def _send_file_response(self, file_path: Path, content_type: str):
         """Send a static file response."""
@@ -216,6 +250,30 @@ class ModelRequestHandler(BaseHTTPRequestHandler):
     def _send_error(self, message: str, status: int = 400):
         """Send an error response."""
         self._send_json_response({"error": message}, status)
+
+    def _reject_oversized_upload(self, content_length: int):
+        """Answer 413, then read and discard (some of) the body.
+
+        Closing the socket with the upload still unread makes the OS reset the
+        connection, and the client sees "connection reset" instead of the 413.
+        The drain is bounded in bytes and time so a client that declares a
+        huge body, or stalls, can't hold the handler.
+        """
+        self._send_error(
+            f"Upload too large ({content_length} bytes). Max: {MAX_UPLOAD_SIZE} bytes.",
+            413
+        )
+        self.close_connection = True
+        self.connection.settimeout(DRAIN_TIMEOUT)
+        remaining = min(content_length, DRAIN_LIMIT)
+        try:
+            while remaining > 0:
+                chunk = self.rfile.read(min(remaining, 1 << 20))
+                if not chunk:
+                    break
+                remaining -= len(chunk)
+        except OSError:  # timed out or the client went away
+            pass
 
     def do_GET(self):
         """Handle GET requests."""
@@ -242,12 +300,15 @@ class ModelRequestHandler(BaseHTTPRequestHandler):
                     "avg_processing_time": avg_time
                 }
 
-            # Get model info
-            device = "CPU" if config.force_cpu else "GPU (if available)"
+            # Get model info. `engine` and `model` name what is actually
+            # loaded; `model_size` (the Whisper model) is kept for older
+            # clients.
             model_info = {
+                "engine": service.engine_name,
+                "model": service.model_name,
                 "model_size": config.whisper_model_size,
                 "language": config.language,
-                "device": device
+                "device": _device_label()
             }
 
             self._send_json_response({
@@ -300,10 +361,7 @@ class ModelRequestHandler(BaseHTTPRequestHandler):
             # Enforce upload size limit
             content_length = int(self.headers.get('Content-Length', 0))
             if content_length > MAX_UPLOAD_SIZE:
-                self._send_error(
-                    f"Upload too large ({content_length} bytes). Max: {MAX_UPLOAD_SIZE} bytes.",
-                    413
-                )
+                self._reject_oversized_upload(content_length)
                 return
 
             # Handle multipart form data (file upload)
@@ -318,10 +376,7 @@ class ModelRequestHandler(BaseHTTPRequestHandler):
             content_type = self.headers.get('Content-Type', '')
             content_length = int(self.headers.get('Content-Length', 0))
             if content_length > MAX_UPLOAD_SIZE:
-                self._send_error(
-                    f"Upload too large ({content_length} bytes). Max: {MAX_UPLOAD_SIZE} bytes.",
-                    413
-                )
+                self._reject_oversized_upload(content_length)
                 return
             if not content_type.startswith('multipart/form-data'):
                 self._send_error("Expected multipart/form-data")
@@ -357,8 +412,19 @@ class ModelRequestHandler(BaseHTTPRequestHandler):
         output_format = config.output_format
         if 'format' in fields:
             _, fmt_value = fields['format']
-            if fmt_value in ('txt', 'srt', 'vtt', 'json', 'pretty'):
-                output_format = fmt_value
+            if fmt_value not in OUTPUT_FORMATS:
+                self._send_error(
+                    f"Unknown format {fmt_value!r}. Must be one of {OUTPUT_FORMATS}"
+                )
+                return
+            output_format = fmt_value
+
+        # The loaded model can't change per request; refuse rather than
+        # silently transcribing with something other than what was asked for.
+        mismatch = _unservable_request_options(fields)
+        if mismatch:
+            self._send_error(mismatch, 409)
+            return
 
         include_diarization = config.include_diarization
         if 'diarize' in fields:
@@ -523,8 +589,9 @@ def initialize_models(config_path: Optional[str] = None):
 
     logger.info("Initializing models...")
 
-    # Load configuration
-    config = Config(config_path or ".env")
+    # Load configuration (the project's .env unless a path is given)
+    load_env_file(config_path)
+    config = Config()
     service = TranscriptionService(config=config, preload_models=True)
 
     logger.info("Models initialized successfully")
@@ -536,8 +603,10 @@ def run_server(host: str, port: int):
     httpd = ThreadedHTTPServer(server_address, ModelRequestHandler)
 
     logger.info(f"Starting model server on {host}:{port}")
-    device = "CPU" if config.force_cpu else "GPU (if available)"
-    logger.info(f"Model: {config.whisper_model_size}, Device: {device}")
+    logger.info(
+        f"Engine: {service.engine_name}, Model: {service.model_name}, "
+        f"Device: {_device_label()}"
+    )
     logger.info("Press Ctrl+C to stop the server")
 
     try:
@@ -562,7 +631,7 @@ def main(argv=None):
     parser.add_argument("--port", "-p", type=int, default=8000,
                        help="Port to bind the server to (default: 8000)")
     parser.add_argument("--config", "-c",
-                       help="Path to configuration file (default: .env)")
+                       help="Path to a .env file (default: the project's .env)")
     parser.add_argument("--verbose", "-v", action="store_true",
                        help="Enable verbose logging")
 
