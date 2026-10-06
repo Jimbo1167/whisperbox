@@ -18,6 +18,7 @@ Welcome to the Whisperbox documentation. This documentation provides comprehensi
 ### API Reference
 - [API Overview](api/index.md)
 - [Transcriber](api/index.md#transcriber)
+- [Transcription Service](api/index.md#transcription-service)
 - [Audio Processor](api/index.md#audio-processor)
 - [Transcription Engine](api/index.md#transcription-engine)
 - [Diarization Engine](api/index.md#diarization-engine)
