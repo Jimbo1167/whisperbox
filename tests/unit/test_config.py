@@ -118,6 +118,14 @@ def test_config_validate():
         assert config.validate() is True
 
 
+@pytest.mark.parametrize("fmt", ["txt", "srt", "vtt", "vtt-voice", "json", "json3", "pretty"])
+def test_validate_accepts_every_supported_output_format(fmt):
+    """validate() used to reject vtt-voice and json3, which the formatter supports."""
+    env = {"OUTPUT_FORMAT": fmt, "TRANSCRIPTION_ENGINE": "whisper"}
+    with patch.dict(os.environ, env, clear=True):
+        assert Config().validate() is True
+
+
 def _clear_engine_env(monkeypatch):
     monkeypatch.delenv("TRANSCRIPTION_ENGINE", raising=False)
     monkeypatch.delenv("PARAKEET_MODEL", raising=False)

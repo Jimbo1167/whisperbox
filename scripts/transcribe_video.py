@@ -16,7 +16,7 @@ from pathlib import Path
 # Add the parent directory to the path so we can import the src package
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from src.config import Config, load_env_file
+from src.config import OUTPUT_FORMATS, Config, load_env_file
 from src.server_client import transcribe_with_server_fallback
 
 logger = logging.getLogger(__name__)
@@ -46,7 +46,7 @@ def main():
                        help='Path to the video or audio file to transcribe')
     parser.add_argument('--output', '-o', 
                        help='Output path for the transcript (default: transcripts/<input_filename>.<format>)')
-    parser.add_argument('--format', '-f', choices=['txt', 'srt', 'vtt', 'json', 'pretty'], 
+    parser.add_argument('--format', '-f', choices=OUTPUT_FORMATS,
                        help='Output format (default: from config)')
     parser.add_argument('--no-diarization', action='store_true',
                        help='Disable speaker diarization')

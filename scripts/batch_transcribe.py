@@ -21,7 +21,7 @@ from tqdm import tqdm
 # Add the parent directory to the path so we can import the package
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from src.config import Config, load_env_file
+from src.config import OUTPUT_FORMATS, Config, load_env_file
 from src.transcriber import Transcriber
 from src.utils.resource_monitor import AdaptiveWorkerPool, get_optimal_worker_count
 from src.utils.progress import ProgressReporter, MultiProgressReporter
@@ -109,7 +109,7 @@ def process_file(
                     segment['start'],
                     segment['end'],
                     segment['text'],
-                    segment.get('speaker', 'SPEAKER')
+                    segment.get('speaker', '')
                 ))
         else:
             # Use regular transcription
@@ -192,7 +192,7 @@ def main(args=None):
     
     parser.add_argument(
         "--format", "-f", 
-        choices=["txt", "srt", "vtt", "json"],
+        choices=OUTPUT_FORMATS,
         default=None,
         help="Output format (default: from config)"
     )
@@ -238,6 +238,11 @@ def main(args=None):
     # Diarization is opt-in per run; INCLUDE_DIARIZATION only sets the model
     # server's default.
     config_kwargs['include_diarization'] = args.diarize
+    if args.streaming:
+        # Streaming is Whisper-only (Transcriber.transcribe_stream raises for
+        # any other engine), and Parakeet is the platform default on Apple
+        # Silicon.
+        config_kwargs['transcription_engine'] = 'whisper'
     
     config = Config(**config_kwargs)
     
@@ -400,7 +405,9 @@ def main(args=None):
     if 'gpu_memory_used_gb' in resource_summary and resource_summary['gpu_memory_used_gb'] > 0:
         logger.info(f"  GPU Memory: {resource_summary['gpu_memory_used_gb']:.2f} GB")
     
-    return 0
+    # Non-zero unless every file was transcribed (failures, or an interrupt
+    # that left files unprocessed), so callers can detect partial batches.
+    return 0 if success_count == len(input_files) else 1
 
 if __name__ == "__main__":
     sys.exit(main())

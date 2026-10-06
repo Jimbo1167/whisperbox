@@ -16,7 +16,7 @@ from pathlib import Path
 # Add the parent directory to the path so we can import the src package
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from src.config import Config, load_env_file
+from src.config import OUTPUT_FORMATS, Config, load_env_file
 from src.transcriber import Transcriber
 from src.utils.progress import ProgressReporter
 
@@ -30,11 +30,6 @@ logging.basicConfig(
 )
 
 logger = logging.getLogger(__name__)
-
-# Every format OutputFormatter can write; kept in sync with the Click CLI's
-# OUTPUT_FORMATS so `transcribe.py stream -f <fmt>` never trips argparse.
-OUTPUT_FORMATS = ["txt", "srt", "vtt", "vtt-voice", "json", "json3", "pretty"]
-
 
 def main(argv=None):
     """Main function for the streaming transcription script.

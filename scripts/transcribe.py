@@ -17,7 +17,7 @@ from typing import Optional, List, Tuple
 # Add the parent directory to the path so we can import the src package
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from src.config import Config, load_env_file
+from src.config import OUTPUT_FORMATS, Config, load_env_file
 from src.service import TranscriptionService
 from src.utils.progress_events import JsonlProgressEmitter
 from src.utils.resource_monitor import ResourceMonitor
@@ -32,11 +32,6 @@ logging.basicConfig(
 )
 
 logger = logging.getLogger(__name__)
-
-# Define output format options.
-# - `vtt-voice` emits WebVTT with `<v Speaker>...</v>` voice spans (YouTube-style).
-# - `json3` emits YouTube's auto-caption wire format, round-trippable via `yt-dlp --convert-subs`.
-OUTPUT_FORMATS = ['txt', 'srt', 'vtt', 'vtt-voice', 'json', 'json3', 'pretty']
 
 # Define model size options
 MODEL_SIZES = ['tiny', 'base', 'small', 'medium', 'large']
@@ -282,8 +277,10 @@ def batch(input_pattern, output_dir, workers, adaptive, diarize, streaming,
     if output_format:
         args.extend(['--format', output_format])
     
-    # Run batch transcribe script
-    batch_main(args)
+    # Run batch transcribe script; it reports failure via its return code
+    exit_code = batch_main(args)
+    if exit_code:
+        sys.exit(exit_code)
 
 @cli.command()
 @click.option('--host', type=str, default='localhost',

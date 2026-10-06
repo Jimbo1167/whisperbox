@@ -13,6 +13,13 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 # The .env every entry point reads, regardless of the working directory.
 DEFAULT_ENV_FILE = PROJECT_ROOT / ".env"
 
+# Every format OutputFormatter can write. Entry points take their choices from
+# here so a new format can't be accepted by one command and rejected by another.
+# - `vtt-voice` emits WebVTT with `<v Speaker>...</v>` voice spans (YouTube-style).
+# - `json3` emits YouTube's auto-caption wire format, round-trippable via
+#   `yt-dlp --convert-subs`.
+OUTPUT_FORMATS = ["txt", "srt", "vtt", "vtt-voice", "json", "json3", "pretty"]
+
 
 def load_env_file(env_file: Optional[Union[str, Path]] = None) -> Optional[Path]:
     """Load a .env file into the environment without overriding it.
@@ -188,9 +195,8 @@ class Config:
             logger.warning("Speaker diarization is enabled but HF_TOKEN is not set")
             return False
 
-        valid_formats = ["txt", "srt", "vtt", "json", "pretty"]
-        if self.output_format not in valid_formats:
-            logger.warning(f"Invalid output format: {self.output_format}. Must be one of {valid_formats}")
+        if self.output_format not in OUTPUT_FORMATS:
+            logger.warning(f"Invalid output format: {self.output_format}. Must be one of {OUTPUT_FORMATS}")
             return False
 
         valid_engines = {"whisper", "parakeet"}
