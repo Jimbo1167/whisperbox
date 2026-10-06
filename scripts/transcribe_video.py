@@ -68,17 +68,19 @@ def main():
     
     logger.info("\nInitializing transcriber...")
     load_env_file()
-    config = Config()
-    
-    # Override config with command line arguments
+
+    # Command-line arguments override the config (as Config overrides, so
+    # --model selects Whisper exactly as it does for the other commands)
+    overrides = {}
     if args.format:
-        config.output_format = args.format
+        overrides['output_format'] = args.format
     if args.no_diarization:
-        config.include_diarization = False
+        overrides['include_diarization'] = False
     if args.model:
-        config.whisper_model_size = args.model
+        overrides['whisper_model'] = args.model
     if args.language:
-        config.language = args.language
+        overrides['language'] = args.language
+    config = Config(**overrides)
     
     # Validate the configuration
     if not config.validate():

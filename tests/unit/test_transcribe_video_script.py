@@ -29,3 +29,26 @@ def test_accepts_every_supported_output_format(monkeypatch, tmp_path, fmt):
 
     ((config, _),) = calls
     assert config.output_format == fmt
+
+
+def test_model_flag_selects_whisper_like_the_other_commands(monkeypatch, tmp_path):
+    import platform
+
+    calls = []
+    monkeypatch.setattr(
+        transcribe_video, "transcribe_with_server_fallback",
+        lambda input_path, config, output: calls.append(config),
+    )
+    monkeypatch.setattr(sys, "platform", "darwin")
+    monkeypatch.setattr(platform, "machine", lambda: "arm64")
+    monkeypatch.delenv("TRANSCRIPTION_ENGINE", raising=False)
+    monkeypatch.setattr(
+        sys, "argv",
+        ["transcribe_video.py", "in.wav", "-m", "small", "-o", str(tmp_path / "out")],
+    )
+
+    transcribe_video.main()
+
+    (config,) = calls
+    assert config.transcription_engine == "whisper"
+    assert config.whisper_model_size == "small"
