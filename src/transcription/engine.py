@@ -73,7 +73,9 @@ class WhisperEngine:
             logger.info("Forcing CPU usage as specified in configuration")
         elif torch.backends.mps.is_available():
             self.device = "mps"
-            logger.info("Using MPS (Metal Performance Shaders) for acceleration")
+            # faster-whisper (CTranslate2) has no MPS backend; the model is
+            # loaded on the CPU below.
+            logger.info("MPS available, but faster-whisper has no MPS backend; Whisper runs on the CPU")
         elif torch.cuda.is_available():
             self.device = "cuda"
             logger.info("Using CUDA for acceleration")

@@ -53,7 +53,7 @@ def main(argv=None):
     parser.add_argument(
         "--output", "--output-path", "-o",
         dest="output_path",
-        help="Path to save the transcript (default: input_file_name.txt)"
+        help="Path to save the transcript (default: next to the input, with the format's extension)"
     )
     
     parser.add_argument(
@@ -70,7 +70,7 @@ def main(argv=None):
     
     parser.add_argument(
         "--model", "-m",
-        help="Whisper model size (tiny, base, small, medium, large)"
+        help="Whisper model (e.g. small, large-v3-turbo; default: WHISPER_MODEL)"
     )
     
     parser.add_argument(
@@ -81,7 +81,7 @@ def main(argv=None):
     parser.add_argument(
         "--format", "-f",
         choices=OUTPUT_FORMATS,
-        help="Output format (default: txt)"
+        help="Output format (default: OUTPUT_FORMAT, else txt)"
     )
     
     parser.add_argument(
@@ -147,6 +147,9 @@ def main(argv=None):
     
     start_time = time.time()
     segments = []
+    # Set when the stream stopped early; the partial transcript is still
+    # saved, but the run exits non-zero so callers know it's incomplete.
+    incomplete = False
     
     # Create progress reporter
     progress = ProgressReporter(
@@ -163,7 +166,7 @@ def main(argv=None):
                     args.input_path, word_timestamps=word_timestamps
                 ):
                     segments.append(_to_row(
-                        segment, segment.get('speaker', 'SPEAKER'), word_timestamps
+                        segment, segment.get('speaker', ''), word_timestamps
                     ))
                     
                     # Update progress
@@ -171,14 +174,14 @@ def main(argv=None):
                     progress.set_description(f"Transcribed {len(segments)} segments")
                     progress.set_postfix(
                         time=f"{segment['end']:.1f}s",
-                        speaker=segment.get('speaker', 'SPEAKER')
+                        speaker=segment.get('speaker', '')
                     )
             else:
                 # Use streaming transcription without diarization
                 for segment in transcriber.transcribe_stream(
                     args.input_path, word_timestamps=word_timestamps
                 ):
-                    segments.append(_to_row(segment, "SPEAKER", word_timestamps))
+                    segments.append(_to_row(segment, "", word_timestamps))
                     
                     # Update progress
                     progress.update(1, f"Segment {len(segments)}")
@@ -187,6 +190,7 @@ def main(argv=None):
     
     except KeyboardInterrupt:
         logger.warning("Transcription interrupted by user")
+        incomplete = True
         if len(segments) > 0:
             logger.info(f"Saving partial transcript with {len(segments)} segments...")
         else:
@@ -195,6 +199,7 @@ def main(argv=None):
     
     except Exception as e:
         logger.error(f"Error during transcription: {str(e)}")
+        incomplete = True
         if len(segments) > 0:
             logger.info(f"Saving partial transcript with {len(segments)} segments...")
         else:
@@ -223,7 +228,7 @@ def main(argv=None):
     if 'gpu_memory_used_gb' in resource_summary and resource_summary['gpu_memory_used_gb'] > 0:
         logger.info(f"  GPU Memory: {resource_summary['gpu_memory_used_gb']:.2f} GB")
     
-    return 0
+    return 1 if incomplete else 0
 
 
 def _to_row(segment, speaker, word_timestamps):

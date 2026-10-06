@@ -111,6 +111,9 @@ form.addEventListener("submit", async (event) => {
   downloadLink.hidden = true;
 
   const data = new FormData(form);
+  // An unchecked box is left out of FormData, which would let the server's
+  // INCLUDE_DIARIZATION default apply; always send the user's choice.
+  data.set("diarize", document.getElementById("diarize").checked ? "true" : "false");
 
   try {
     const payload = await new Promise((resolve, reject) => {

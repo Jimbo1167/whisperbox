@@ -213,3 +213,28 @@ def test_stream_words_reach_json_through_the_real_pipeline(wav_path, tmp_path, m
     assert all(call["word_timestamps"] is True for call in _RecordingWhisper.calls)
     (segment,) = json.loads(out.read_text(encoding="utf-8"))
     assert [w["word"] for w in segment["words"]] == [" Hello", " world."]
+
+
+def test_failure_mid_stream_saves_partial_transcript_but_exits_nonzero(
+    wav_path, tmp_path, monkeypatch
+):
+    def one_segment_then_fail(self, input_path, word_timestamps=False):
+        yield {"start": 0.0, "end": 0.9, "text": "Hello world."}
+        raise RuntimeError("decoder crashed")
+
+    monkeypatch.setattr(FakeTranscriber, "transcribe_stream", one_segment_then_fail)
+    out = tmp_path / "out.txt"
+
+    result = CliRunner().invoke(cli, ["stream", str(wav_path), "-f", "txt", "-o", str(out)])
+
+    assert result.exit_code == 1
+    assert "Hello world." in out.read_text(encoding="utf-8")
+
+
+def test_stream_without_diarization_has_no_speaker_labels(wav_path, tmp_path):
+    out = tmp_path / "out.txt"
+
+    result = CliRunner().invoke(cli, ["stream", str(wav_path), "-f", "txt", "-o", str(out)])
+
+    assert result.exit_code == 0, result.output
+    assert "SPEAKER" not in out.read_text(encoding="utf-8")
