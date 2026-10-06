@@ -47,11 +47,15 @@ def test_whisper_engine_passes_engine_id_to_cache(test_config, mock_whisper_mode
 
     cache_mock.get_cached_transcription.assert_called_once()
     _, kwargs = cache_mock.get_cached_transcription.call_args
-    assert kwargs["engine_id"] == f"whisper-{cfg.whisper_model_size}"
+    assert kwargs["engine_id"] == (
+        f"whisper-{cfg.whisper_model_size}-{cfg.language}-beam{cfg.whisper_beam_size}"
+    )
 
     cache_mock.cache_transcription.assert_called_once()
     _, kwargs = cache_mock.cache_transcription.call_args
-    assert kwargs["engine_id"] == f"whisper-{cfg.whisper_model_size}"
+    assert kwargs["engine_id"] == (
+        f"whisper-{cfg.whisper_model_size}-{cfg.language}-beam{cfg.whisper_beam_size}"
+    )
 
 
 def test_whisper_engine_id_slugs_unsafe_model_size(test_config, mock_whisper_model, tmp_path):
@@ -74,4 +78,4 @@ def test_whisper_engine_id_slugs_unsafe_model_size(test_config, mock_whisper_mod
 
     _, kwargs = cache_mock.get_cached_transcription.call_args
     assert "/" not in kwargs["engine_id"]
-    assert kwargs["engine_id"] == "whisper-deepdml_faster-distil-whisper-large-v3.5"
+    assert kwargs["engine_id"].startswith("whisper-deepdml_faster-distil-whisper-large-v3.5-")

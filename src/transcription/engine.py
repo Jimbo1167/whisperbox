@@ -161,8 +161,12 @@ class WhisperEngine:
             TimeoutException: If transcription times out
             Exception: If transcription fails
         """
-        # Check if we have cached results
-        cache_engine_id = f"whisper-{_slug(self.whisper_model_size)}"
+        # Check if we have cached results. Key on every setting that changes
+        # the transcript, so changing one never returns a stale result.
+        cache_engine_id = (
+            f"whisper-{_slug(self.whisper_model_size)}-{_slug(self.language or 'auto')}"
+            f"-beam{self.config.whisper_beam_size}"
+        )
 
         if self.cache_manager:
             cached_transcription = self.cache_manager.get_cached_transcription(

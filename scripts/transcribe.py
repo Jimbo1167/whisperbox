@@ -357,40 +357,38 @@ def client(server, command, args):
     # detect a failed job
     sys.exit(client_main(cmd_args))
 
+COMPLETION_SHELLS = ['bash', 'zsh', 'fish']
+
 @cli.command()
-def completion():
-    """Generate shell completion script.
-    
-    This command generates a shell completion script for the current shell.
-    It supports bash, zsh, and fish shells.
-    
+@click.argument('shell', required=False, type=click.Choice(COMPLETION_SHELLS))
+def completion(shell):
+    """Print a shell completion script (bash, zsh or fish).
+
+    SHELL defaults to your login shell ($SHELL). The script completes the
+    program name `transcribe.py`, so it works when transcribe.py is on your
+    PATH and runs under the project's virtualenv (e.g. via a wrapper script).
+
     To install completions:
-    
-    For bash:
-        transcribe completion > ~/.transcribe-complete.bash
-        echo 'source ~/.transcribe-complete.bash' >> ~/.bashrc
-    
-    For zsh:
-        transcribe completion > ~/.transcribe-complete.zsh
-        echo 'source ~/.transcribe-complete.zsh' >> ~/.zshrc
-    
-    For fish:
-        transcribe completion > ~/.config/fish/completions/transcribe.fish
+
+    \b
+    bash:  transcribe.py completion bash > ~/.transcribe-complete.bash
+           echo 'source ~/.transcribe-complete.bash' >> ~/.bashrc
+    zsh:   transcribe.py completion zsh > ~/.transcribe-complete.zsh
+           echo 'source ~/.transcribe-complete.zsh' >> ~/.zshrc
+    fish:  transcribe.py completion fish > ~/.config/fish/completions/transcribe.py.fish
     """
-    # Detect shell
-    shell = os.environ.get('SHELL', '').split('/')[-1]
-    
-    if shell == 'bash':
-        script = os.popen(f'_TRANSCRIBE_COMPLETE=bash_source {sys.argv[0]}').read()
-    elif shell == 'zsh':
-        script = os.popen(f'_TRANSCRIBE_COMPLETE=zsh_source {sys.argv[0]}').read()
-    elif shell == 'fish':
-        script = os.popen(f'_TRANSCRIBE_COMPLETE=fish_source {sys.argv[0]}').read()
-    else:
-        click.echo(f"Unsupported shell: {shell}")
-        return
-    
-    click.echo(script)
+    from click.shell_completion import get_completion_class
+
+    shell = shell or os.environ.get('SHELL', '').rsplit('/', 1)[-1]
+    if shell not in COMPLETION_SHELLS:
+        raise click.UsageError(
+            f"Unsupported shell {shell!r}; pass one of: {', '.join(COMPLETION_SHELLS)}"
+        )
+
+    complete = get_completion_class(shell)(
+        cli, {}, 'transcribe.py', '_TRANSCRIBE_PY_COMPLETE'
+    )
+    click.echo(complete.source())
 
 if __name__ == '__main__':
     cli(obj={}) 
