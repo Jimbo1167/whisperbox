@@ -1,5 +1,4 @@
 import os
-import re
 import time
 import logging
 from typing import List, Dict, Any, Optional, Tuple, Iterator, Generator, Protocol, runtime_checkable
@@ -13,19 +12,12 @@ import numpy as np
 
 from ..config import Config
 from ..audio.processor import run_with_timeout, TimeoutException
-from ..cache.manager import CacheManager
+from ..cache.manager import CacheManager, _slug
 from .streaming import StreamingTranscriber, AsyncStreamingTranscriber
 
 logger = logging.getLogger(__name__)
 
 
-def _slug(text: str) -> str:
-    """Return a filesystem-safe slug for cache keys and filenames.
-
-    HF model ids contain '/'; local paths contain '/' (and on macOS, spaces).
-    Both must produce a single safe token.
-    """
-    return re.sub(r"[^A-Za-z0-9._-]", "_", text)
 
 
 @runtime_checkable
@@ -73,7 +65,9 @@ class WhisperEngine:
             logger.info("Forcing CPU usage as specified in configuration")
         elif torch.backends.mps.is_available():
             self.device = "mps"
-            logger.info("Using MPS (Metal Performance Shaders) for acceleration")
+            # faster-whisper (CTranslate2) has no MPS backend; the model is
+            # loaded on the CPU below.
+            logger.info("MPS available, but faster-whisper has no MPS backend; Whisper runs on the CPU")
         elif torch.cuda.is_available():
             self.device = "cuda"
             logger.info("Using CUDA for acceleration")
@@ -161,8 +155,12 @@ class WhisperEngine:
             TimeoutException: If transcription times out
             Exception: If transcription fails
         """
-        # Check if we have cached results
-        cache_engine_id = f"whisper-{_slug(self.whisper_model_size)}"
+        # Check if we have cached results. Key on every setting that changes
+        # the transcript, so changing one never returns a stale result.
+        cache_engine_id = (
+            f"whisper-{_slug(self.whisper_model_size)}-{_slug(self.language or 'auto')}"
+            f"-beam{self.config.whisper_beam_size}"
+        )
 
         if self.cache_manager:
             cached_transcription = self.cache_manager.get_cached_transcription(

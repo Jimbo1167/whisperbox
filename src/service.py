@@ -8,6 +8,7 @@ import logging
 from .config import Config
 from .output.formatter import OutputFormatter
 from .transcriber import Transcriber
+from .transcription.engine import ParakeetEngine
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +36,25 @@ class TranscriptionService:
         if self._transcriber is None:
             self._transcriber = Transcriber(self.config, test_mode=self.test_mode)
         return self._transcriber
+
+    @property
+    def engine_name(self) -> str:
+        """Name of the ASR engine this service actually runs.
+
+        Read from the constructed engine rather than the config, because a
+        defaulted parakeet selection silently falls back to whisper when
+        parakeet-mlx isn't installed.
+        """
+        engine = self.transcriber.transcription_engine
+        return "parakeet" if isinstance(engine, ParakeetEngine) else "whisper"
+
+    @property
+    def model_name(self) -> str:
+        """Model the ASR engine loads (a Parakeet model id or Whisper model)."""
+        engine = self.transcriber.transcription_engine
+        if isinstance(engine, ParakeetEngine):
+            return engine.parakeet_model_id
+        return engine.whisper_model_size
 
     def preload_models(self) -> None:
         """Warm transcription and diarization models ahead of the first request."""

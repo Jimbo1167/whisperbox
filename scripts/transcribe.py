@@ -17,7 +17,7 @@ from typing import Optional, List, Tuple
 # Add the parent directory to the path so we can import the src package
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from src.config import Config
+from src.config import OUTPUT_FORMATS, Config, load_env_file
 from src.service import TranscriptionService
 from src.utils.progress_events import JsonlProgressEmitter
 from src.utils.resource_monitor import ResourceMonitor
@@ -33,13 +33,14 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
-# Define output format options.
-# - `vtt-voice` emits WebVTT with `<v Speaker>...</v>` voice spans (YouTube-style).
-# - `json3` emits YouTube's auto-caption wire format, round-trippable via `yt-dlp --convert-subs`.
-OUTPUT_FORMATS = ['txt', 'srt', 'vtt', 'vtt-voice', 'json', 'json3', 'pretty']
+# ASR engines selectable per run (TRANSCRIPTION_ENGINE sets the default).
+ENGINES = ['whisper', 'parakeet']
 
-# Define model size options
-MODEL_SIZES = ['tiny', 'base', 'small', 'medium', 'large']
+# Any name faster-whisper accepts (size, Hugging Face repo id, or local path).
+MODEL_HELP = ('Whisper model, e.g. tiny, base, small, medium, large-v3, large-v3-turbo. '
+              'Selects the Whisper engine unless --engine is given.')
+ENGINE_HELP = ('ASR engine (default: TRANSCRIPTION_ENGINE, else parakeet on Apple '
+               'Silicon and whisper elsewhere).')
 
 # Progress reporting modes. ``pretty`` is the legacy click-colored output;
 # ``jsonl`` emits machine-readable events on stderr for programmatic callers;
@@ -77,7 +78,8 @@ def cli(ctx, verbose):
 @click.argument('input_path', type=click.Path(exists=True))
 @click.option('--output', '-o', type=click.Path(), help='Output file path.')
 @click.option('--diarize', '-d', is_flag=True, help='Include speaker diarization.')
-@click.option('--model', '-m', type=click.Choice(MODEL_SIZES), help='Whisper model size.')
+@click.option('--model', '-m', help=MODEL_HELP)
+@click.option('--engine', '-e', type=click.Choice(ENGINES), help=ENGINE_HELP)
 @click.option('--language', '-l', help='Language code (e.g., en, fr, de).')
 @click.option('--format', '-f', 'output_format', type=click.Choice(OUTPUT_FORMATS),
               help='Output format.')
@@ -85,7 +87,8 @@ def cli(ctx, verbose):
               default='pretty', show_default=True,
               help='Progress reporting mode. Use "jsonl" to emit one JSON event '
                    'per line on stderr for programmatic callers.')
-def transcribe(input_path, output, diarize, model, language, output_format, progress_mode):
+def transcribe(input_path, output, diarize, model, engine, language, output_format,
+               progress_mode):
     """Transcribe an audio or video file.
 
     This command transcribes the given audio or video file and saves the result
@@ -101,16 +104,21 @@ def transcribe(input_path, output, diarize, model, language, output_format, prog
     """
     start_time = time.time()
 
+    load_env_file()
+
     # Create configuration
     config_kwargs = {}
     if model:
         config_kwargs['whisper_model'] = model
+    if engine:
+        config_kwargs['transcription_engine'] = engine
     if language:
         config_kwargs['language'] = language
     if output_format:
         config_kwargs['output_format'] = output_format
-    if diarize:
-        config_kwargs['include_diarization'] = True
+    # Diarization is opt-in per run, as with `client`: INCLUDE_DIARIZATION
+    # only sets the model server's default.
+    config_kwargs['include_diarization'] = diarize
 
     config = Config(**config_kwargs)
 
@@ -137,7 +145,10 @@ def transcribe(input_path, output, diarize, model, language, output_format, prog
             output=output,
             format=config.output_format,
             diarize=bool(config.include_diarization),
-            model=config.whisper_model_size,
+            # From the built engine: a defaulted Parakeet falls back to
+            # Whisper when parakeet-mlx isn't installed.
+            engine=service.engine_name,
+            model=service.model_name,
             language=config.language,
         )
 
@@ -192,7 +203,7 @@ def transcribe(input_path, output, diarize, model, language, output_format, prog
 @click.option('--output', '-o', type=click.Path(), help='Output file path.')
 @click.option('--diarize', '-d', is_flag=True, help='Include speaker diarization.')
 @click.option('--words', '-w', is_flag=True, help='Include word-level timestamps.')
-@click.option('--model', '-m', type=click.Choice(MODEL_SIZES), help='Whisper model size.')
+@click.option('--model', '-m', help=MODEL_HELP)
 @click.option('--language', '-l', help='Language code (e.g., en, fr, de).')
 @click.option('--format', '-f', 'output_format', type=click.Choice(OUTPUT_FORMATS), 
               help='Output format.')
@@ -241,13 +252,14 @@ def stream(input_path, output, diarize, words, model, language, output_format):
               help='Use adaptive worker pool that adjusts based on system load.')
 @click.option('--diarize', '-d', is_flag=True, help='Include speaker diarization.')
 @click.option('--streaming', '-s', is_flag=True,
-              help='Use streaming transcription (reduces memory usage).')
-@click.option('--model', '-m', type=click.Choice(MODEL_SIZES), help='Whisper model size.')
+              help='Use streaming transcription (reduces memory usage; Whisper only).')
+@click.option('--model', '-m', help=MODEL_HELP)
+@click.option('--engine', '-e', type=click.Choice(ENGINES), help=ENGINE_HELP)
 @click.option('--language', '-l', help='Language code (e.g., en, fr, de).')
 @click.option('--format', '-f', 'output_format', type=click.Choice(OUTPUT_FORMATS), 
               help='Output format.')
 def batch(input_pattern, output_dir, workers, adaptive, diarize, streaming,
-          model, language, output_format):
+          model, engine, language, output_format):
     """Batch process multiple audio or video files.
     
     This command processes multiple files matching the given glob pattern.
@@ -274,21 +286,25 @@ def batch(input_pattern, output_dir, workers, adaptive, diarize, streaming,
         args.append('--streaming')
     if model:
         args.extend(['--model', model])
+    if engine:
+        args.extend(['--engine', engine])
     if language:
         args.extend(['--language', language])
     if output_format:
         args.extend(['--format', output_format])
     
-    # Run batch transcribe script
-    batch_main(args)
+    # Run batch transcribe script; it reports failure via its return code
+    exit_code = batch_main(args)
+    if exit_code:
+        sys.exit(exit_code)
 
 @cli.command()
 @click.option('--host', type=str, default='localhost',
               help='Host to bind the server to.')
 @click.option('--port', '-p', type=int, default=8000,
               help='Port to bind the server to.')
-@click.option('--config', '-c', type=click.Path(), default='.env',
-              help='Path to configuration file.')
+@click.option('--config', '-c', type=click.Path(),
+              help="Path to a .env file (default: the project's .env).")
 def server(host, port, config):
     """Run a model server for persistent model instances.
     
@@ -342,40 +358,38 @@ def client(server, command, args):
     # detect a failed job
     sys.exit(client_main(cmd_args))
 
+COMPLETION_SHELLS = ['bash', 'zsh', 'fish']
+
 @cli.command()
-def completion():
-    """Generate shell completion script.
-    
-    This command generates a shell completion script for the current shell.
-    It supports bash, zsh, and fish shells.
-    
+@click.argument('shell', required=False, type=click.Choice(COMPLETION_SHELLS))
+def completion(shell):
+    """Print a shell completion script (bash, zsh or fish).
+
+    SHELL defaults to your login shell ($SHELL). The script completes the
+    program name `transcribe.py`, so it works when transcribe.py is on your
+    PATH and runs under the project's virtualenv (e.g. via a wrapper script).
+
     To install completions:
-    
-    For bash:
-        transcribe completion > ~/.transcribe-complete.bash
-        echo 'source ~/.transcribe-complete.bash' >> ~/.bashrc
-    
-    For zsh:
-        transcribe completion > ~/.transcribe-complete.zsh
-        echo 'source ~/.transcribe-complete.zsh' >> ~/.zshrc
-    
-    For fish:
-        transcribe completion > ~/.config/fish/completions/transcribe.fish
+
+    \b
+    bash:  transcribe.py completion bash > ~/.transcribe-complete.bash
+           echo 'source ~/.transcribe-complete.bash' >> ~/.bashrc
+    zsh:   transcribe.py completion zsh > ~/.transcribe-complete.zsh
+           echo 'source ~/.transcribe-complete.zsh' >> ~/.zshrc
+    fish:  transcribe.py completion fish > ~/.config/fish/completions/transcribe.py.fish
     """
-    # Detect shell
-    shell = os.environ.get('SHELL', '').split('/')[-1]
-    
-    if shell == 'bash':
-        script = os.popen(f'_TRANSCRIBE_COMPLETE=bash_source {sys.argv[0]}').read()
-    elif shell == 'zsh':
-        script = os.popen(f'_TRANSCRIBE_COMPLETE=zsh_source {sys.argv[0]}').read()
-    elif shell == 'fish':
-        script = os.popen(f'_TRANSCRIBE_COMPLETE=fish_source {sys.argv[0]}').read()
-    else:
-        click.echo(f"Unsupported shell: {shell}")
-        return
-    
-    click.echo(script)
+    from click.shell_completion import get_completion_class
+
+    shell = shell or os.environ.get('SHELL', '').rsplit('/', 1)[-1]
+    if shell not in COMPLETION_SHELLS:
+        raise click.UsageError(
+            f"Unsupported shell {shell!r}; pass one of: {', '.join(COMPLETION_SHELLS)}"
+        )
+
+    complete = get_completion_class(shell)(
+        cli, {}, 'transcribe.py', '_TRANSCRIBE_PY_COMPLETE'
+    )
+    click.echo(complete.source())
 
 if __name__ == '__main__':
     cli(obj={}) 

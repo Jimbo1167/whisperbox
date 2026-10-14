@@ -19,7 +19,7 @@ def _free_port():
 
 class FakeModelServer(BaseHTTPRequestHandler):
     segments = [[0.0, 1.5, "hello world", ""]]
-    status_model = {"model_size": "large-v3-turbo", "language": "en"}
+    status_model = {"engine": "whisper", "model": "large-v3-turbo", "language": "en"}
     last_post_payload = None
 
     def do_GET(self):
@@ -58,21 +58,27 @@ class FakeModelServer(BaseHTTPRequestHandler):
 @pytest.fixture
 def fake_server(config):
     FakeModelServer.status_model = {
-        "model_size": config.whisper_model_size,
+        "engine": config.transcription_engine,
+        "model": config.whisper_model_size,
         "language": config.language,
     }
     FakeModelServer.last_post_payload = None
     port = _free_port()
     server = HTTPServer(("127.0.0.1", port), FakeModelServer)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread = threading.Thread(
+        target=server.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True
+    )
     thread.start()
     yield f"http://127.0.0.1:{port}"
     server.shutdown()
+    server.server_close()
 
 
 @pytest.fixture
 def config():
-    cfg = Config()
+    # Whisper explicitly, so the fake server's status matches on any platform
+    # (Parakeet is the Apple Silicon default).
+    cfg = Config(transcription_engine="whisper")
     cfg.include_diarization = False
     return cfg
 
@@ -133,7 +139,7 @@ def test_sends_explicit_diarization_flag(config, input_file, tmp_path, fake_serv
 
 def test_skips_server_when_model_differs(config, input_file, tmp_path, fake_server):
     """A stale server loaded with a different model must not serve the request."""
-    FakeModelServer.status_model = {"model_size": "tiny", "language": "en"}
+    FakeModelServer.status_model = {"engine": "whisper", "model": "tiny", "language": "en"}
     result = try_server_transcribe(
         input_file, config, str(tmp_path / "out.txt"), server_url=fake_server
     )
@@ -142,7 +148,7 @@ def test_skips_server_when_model_differs(config, input_file, tmp_path, fake_serv
 
 def test_skips_server_when_language_differs(config, input_file, tmp_path, fake_server):
     FakeModelServer.status_model = {
-        "model_size": config.whisper_model_size, "language": "de",
+        "engine": "whisper", "model": config.whisper_model_size, "language": "de",
     }
     result = try_server_transcribe(
         input_file, config, str(tmp_path / "out.txt"), server_url=fake_server

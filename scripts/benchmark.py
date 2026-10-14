@@ -41,9 +41,8 @@ import jiwer
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from src.config import Config  # noqa: E402
+from src.config import Config, load_env_file  # noqa: E402
 from src.service import TranscriptionService  # noqa: E402
-from src.transcription.engine import ParakeetEngine  # noqa: E402
 
 
 _VTT_TIMESTAMP_RE = re.compile(r"^\d{2}:\d{2}:\d{2}\.\d{3} -->")
@@ -169,23 +168,13 @@ def compute_metrics(reference: str, hypothesis: str) -> dict:
 
 
 def build_service(engine: str | None, model: str | None) -> TranscriptionService:
+    load_env_file()
     config_kwargs = {"include_diarization": False}
     if engine:
         config_kwargs["transcription_engine"] = engine
     if model:
         config_kwargs["whisper_model"] = model
     return TranscriptionService(Config(**config_kwargs))
-
-
-def active_engine_name(service: TranscriptionService) -> str:
-    """Name of the ASR engine the service will actually run.
-
-    Read from the constructed engine rather than the config, because a
-    defaulted parakeet selection silently falls back to whisper when
-    parakeet-mlx isn't installed.
-    """
-    asr_engine = service.transcriber.transcription_engine
-    return "parakeet" if isinstance(asr_engine, ParakeetEngine) else "whisper"
 
 
 def run_pipeline(service: TranscriptionService, audio_path: Path) -> Tuple[dict, float]:
@@ -205,7 +194,8 @@ def main(argv: list[str] | None = None) -> int:
                         help="ASR engine override (defaults to TRANSCRIPTION_ENGINE env, else the "
                              "platform default: parakeet on Apple Silicon, whisper elsewhere)")
     parser.add_argument("--model", default=None,
-                        help="Override the whisper model size (e.g. tiny, base, large-v3-turbo)")
+                        help="Whisper model (e.g. tiny, base, large-v3-turbo); selects Whisper "
+                             "unless --engine is given")
     parser.add_argument("--reference", default=None,
                         help="Path to a reference VTT file. If supplied, the URL argument is "
                              "treated as a local audio file and yt-dlp is not called.")
@@ -233,7 +223,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"      audio={audio_path.name}  subs={subs_path.name}  id={video_id}", file=sys.stderr)
 
     service = build_service(args.engine, args.model)
-    engine = active_engine_name(service)
+    engine = service.engine_name
     print(f"[2/4] Running whisperbox pipeline (engine={engine})", file=sys.stderr)
     result, elapsed = run_pipeline(service, audio_path)
     print(f"      done in {elapsed:.1f}s  segments={len(result['segments'])}", file=sys.stderr)
@@ -251,7 +241,7 @@ def main(argv: list[str] | None = None) -> int:
         "video_title": meta.get("title"),
         "video_duration_s": meta.get("duration"),
         "engine": engine,
-        "model": args.model or os.getenv("WHISPER_MODEL") or "default",
+        "model": service.model_name,
         "ref_source": (
             meta.get("ref_source") if not args.reference else f"file:{args.reference}"
         ) or "unknown",

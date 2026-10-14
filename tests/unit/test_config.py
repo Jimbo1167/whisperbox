@@ -118,6 +118,14 @@ def test_config_validate():
         assert config.validate() is True
 
 
+@pytest.mark.parametrize("fmt", ["txt", "srt", "vtt", "vtt-voice", "json", "json3", "pretty"])
+def test_validate_accepts_every_supported_output_format(fmt):
+    """validate() used to reject vtt-voice and json3, which the formatter supports."""
+    env = {"OUTPUT_FORMAT": fmt, "TRANSCRIPTION_ENGINE": "whisper"}
+    with patch.dict(os.environ, env, clear=True):
+        assert Config().validate() is True
+
+
 def _clear_engine_env(monkeypatch):
     monkeypatch.delenv("TRANSCRIPTION_ENGINE", raising=False)
     monkeypatch.delenv("PARAKEET_MODEL", raising=False)
@@ -224,3 +232,61 @@ class TestWhisperTuning:
         assert d["whisper_beam_size"] == 5
         assert d["whisper_cpu_threads"] == 0
         assert d["whisper_batch_size"] == 0
+
+
+class TestWhisperModelSelectsEngine:
+    """An explicit Whisper model request (--model) used to be silently ignored
+    on Apple Silicon, where Parakeet is the default engine."""
+
+    @pytest.fixture(autouse=True)
+    def apple_silicon(self, monkeypatch):
+        monkeypatch.setattr(sys, "platform", "darwin")
+        monkeypatch.setattr(platform, "machine", lambda: "arm64")
+        monkeypatch.delenv("TRANSCRIPTION_ENGINE", raising=False)
+
+    def test_model_override_selects_whisper_over_the_platform_default(self):
+        cfg = Config(whisper_model="medium")
+        assert cfg.transcription_engine == "whisper"
+        assert cfg.whisper_model_size == "medium"
+
+    def test_model_from_env_alone_keeps_the_platform_default(self, monkeypatch):
+        # WHISPER_MODEL in .env configures Whisper for when it's used; it
+        # isn't a request to switch engines.
+        monkeypatch.setenv("WHISPER_MODEL", "medium")
+        assert Config().transcription_engine == "parakeet"
+
+    def test_explicit_parakeet_wins_and_warns(self, monkeypatch, caplog):
+        monkeypatch.setenv("TRANSCRIPTION_ENGINE", "parakeet")
+        cfg = Config(whisper_model="medium")
+        assert cfg.transcription_engine == "parakeet"
+        assert "no effect" in caplog.text
+
+    def test_explicit_parakeet_override_wins(self):
+        cfg = Config(whisper_model="medium", transcription_engine="parakeet")
+        assert cfg.transcription_engine == "parakeet"
+
+    def test_language_override_under_parakeet_warns(self, caplog):
+        Config(language="fr")
+        assert "language" in caplog.text.lower()
+
+
+class TestWhisperForStreaming:
+    """Streaming is Whisper-only; switching an explicit engine must be visible."""
+
+    @pytest.fixture(autouse=True)
+    def apple_silicon(self, monkeypatch):
+        monkeypatch.setattr(sys, "platform", "darwin")
+        monkeypatch.setattr(platform, "machine", lambda: "arm64")
+        monkeypatch.delenv("TRANSCRIPTION_ENGINE", raising=False)
+
+    def test_defaulted_engine_switches_quietly(self, caplog):
+        cfg = Config()
+        cfg.use_whisper_for_streaming()
+        assert cfg.transcription_engine == "whisper"
+        assert "Whisper-only" not in caplog.text
+
+    def test_explicit_engine_switches_with_a_warning(self, caplog):
+        cfg = Config(transcription_engine="parakeet")
+        cfg.use_whisper_for_streaming()
+        assert cfg.transcription_engine == "whisper"
+        assert "Whisper-only" in caplog.text

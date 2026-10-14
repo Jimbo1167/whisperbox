@@ -5,6 +5,8 @@
 **Severity:** high — any run with diarization enabled fails at the end, and the completed transcription result is discarded
 **Status:** fixed 2026-08-30 (see §8). Workaround applied downstream (see §6).
 
+Line numbers in this report refer to commit `9c297f9`; the code has changed since.
+
 This report is written to be picked up cold by another agent. Everything needed to reproduce, diagnose, and fix is below; nothing else in the session context is required.
 
 ---
@@ -100,10 +102,10 @@ Fast repro without a long audio file: `./venv/bin/python -c "import torchcodec"`
 
 ## 5. Acceptance criteria
 
-- [ ] Client `transcribe` without `--diarize` never runs diarization regardless of `.env`.
-- [ ] With diarization requested and torchcodec broken, the run fails **fast** (before transcription) with an actionable message — or degrades to transcription-only with a warning, but never burns the full transcription pass and then errors.
-- [ ] Post-step failure returns the transcription segments to the client.
-- [ ] `./venv/bin/python -c "from torchcodec.decoders import AudioDecoder"` succeeds after the environment fix, and a real `--diarize` run completes.
+- [x] Client `transcribe` without `--diarize` never runs diarization regardless of `.env`.
+- [x] With diarization requested and torchcodec broken, the run fails **fast** (before transcription) with an actionable message — or degrades to transcription-only with a warning, but never burns the full transcription pass and then errors.
+- [x] Post-step failure returns the transcription segments to the client.
+- [x] `./venv/bin/python -c "from torchcodec.decoders import AudioDecoder"` succeeds after the environment fix, and a real `--diarize` run completes.
 
 ## 6. Workaround used downstream (context only)
 
@@ -151,9 +153,10 @@ results and JSON responses; the CLI and model client print a warning. A failed
   >= 2.11 per torchcodec's table; ships `libtorchcodec_core9` for FFmpeg 9).
   **Caveat:** 0.16's macOS wheels carry no `LC_RPATH`, so the FFmpeg dylibs
   aren't findable from a uv/pyenv Python whose rpath doesn't include
-  homebrew. Fixed by adding the rpath to the venv's torchcodec libraries:
+  homebrew. Fixed by adding the rpath to the venv's torchcodec libraries
+  (fish shell syntax):
 
-  ```
+  ```fish
   cd venv/lib/python3.13/site-packages/torchcodec
   for f in libtorchcodec_core*.dylib libtorchcodec_custom_ops*.dylib
       install_name_tool -add_rpath /opt/homebrew/opt/ffmpeg/lib $f
@@ -179,3 +182,7 @@ thread that `Transcriber.transcribe` uses for the parallel
 transcribe+diarize block. Whisper is unaffected. With Issue C's fix the job
 still fails (it's the transcription step that dies), so this needs its own
 fix.
+
+**Update:** fixed in PR #7 (`478f17c`). `ParakeetEngine._load_model` in
+`src/transcription/engine.py` now materializes the model weights on the loading
+thread (`mx.eval(model.parameters())`), so inference works from worker threads.

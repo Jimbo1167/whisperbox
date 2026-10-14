@@ -39,11 +39,12 @@ def _server_is_healthy(server_url: str) -> bool:
 
 
 def _server_matches_config(server_url: str, config: Config) -> bool:
-    """Check the server was loaded with the model/language this run expects.
+    """Check the server runs the engine, model and language this run expects.
 
     A long-running server keeps the config it started with; silently
-    transcribing with a different model or language than the caller's
-    config would change output quality with no warning.
+    transcribing with a different engine, model or language than the caller's
+    config would change output quality with no warning. Language only matters
+    for Whisper (Parakeet detects it).
     """
     try:
         with urllib.request.urlopen(
@@ -54,13 +55,16 @@ def _server_matches_config(server_url: str, config: Config) -> bool:
         return False
 
     model = status.get("model") or {}
-    if model.get("model_size") != config.whisper_model_size:
+    engine = config.transcription_engine
+    wanted = config.parakeet_model if engine == "parakeet" else config.whisper_model_size
+    served = (model.get("engine"), model.get("model"))
+    if served != (engine, wanted):
         logger.info(
-            "Model server runs %s but this request wants %s; transcribing locally",
-            model.get("model_size"), config.whisper_model_size,
+            "Model server runs %s %s but this request wants %s %s; transcribing locally",
+            *served, engine, wanted,
         )
         return False
-    if model.get("language") != config.language:
+    if engine == "whisper" and model.get("language") != config.language:
         logger.info(
             "Model server language %s differs from requested %s; transcribing locally",
             model.get("language"), config.language,

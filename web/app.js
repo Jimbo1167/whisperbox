@@ -111,6 +111,9 @@ form.addEventListener("submit", async (event) => {
   downloadLink.hidden = true;
 
   const data = new FormData(form);
+  // An unchecked box is left out of FormData, which would let the server's
+  // INCLUDE_DIARIZATION default apply; always send the user's choice.
+  data.set("diarize", document.getElementById("diarize").checked ? "true" : "false");
 
   try {
     const payload = await new Promise((resolve, reject) => {
@@ -175,8 +178,10 @@ form.addEventListener("submit", async (event) => {
 fetch("/api/status")
   .then((response) => response.json())
   .then((payload) => {
-    const model = payload.model?.model_size || "unknown";
-    setStatus(`Server ready. Model: ${model}.`);
+    const info = payload.model || {};
+    const model = info.model || info.model_size || "unknown";
+    const engine = info.engine ? `${info.engine} ` : "";
+    setStatus(`Server ready. Model: ${engine}${model}.`);
     setProgress(0);
   })
   .catch(() => {

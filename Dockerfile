@@ -19,6 +19,8 @@ ENV PYTHONPATH=/app
 # Copy application code
 COPY src/ /app/src/
 COPY scripts/ /app/scripts/
+# Browser UI served by the model server at /
+COPY web/ /app/web/
 
 # Create directories for transcripts
 RUN mkdir -p /app/transcripts

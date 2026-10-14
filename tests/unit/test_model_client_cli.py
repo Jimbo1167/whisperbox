@@ -58,7 +58,12 @@ class FakeJobServer(BaseHTTPRequestHandler):
 
 
 @pytest.fixture
-def job_server():
+def job_server(monkeypatch):
+    # The Click command imports scripts.model_client; don't wait a real second
+    # between job polls.
+    import scripts.model_client
+
+    monkeypatch.setattr(scripts.model_client, "POLL_INTERVAL", 0.01)
     FakeJobServer.job = None
     FakeJobServer.last_post_body = None
     server = HTTPServer(("127.0.0.1", _free_port()), FakeJobServer)
@@ -136,6 +141,22 @@ def test_client_transcribe_writes_output_file_when_job_completes(
     job_server, input_file, tmp_path
 ):
     FakeJobServer.job = _completed_job()
+    output = tmp_path / "out.txt"
+
+    result = _run_client(job_server, input_file, "--output", str(output))
+
+    assert result.exit_code == 0, result.exception
+    # The file holds the transcript the server formatted in the requested
+    # format, not the client's console rendering.
+    assert output.read_text() == _completed_job()["result"]["preview_text"]
+
+
+def test_output_file_falls_back_to_segments_without_preview_text(
+    job_server, input_file, tmp_path
+):
+    job = _completed_job()
+    del job["result"]["preview_text"]
+    FakeJobServer.job = job
     output = tmp_path / "out.txt"
 
     result = _run_client(job_server, input_file, "--output", str(output))

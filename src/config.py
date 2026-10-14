@@ -1,11 +1,52 @@
 import os
 import platform
 import sys
-from typing import Optional, Dict, Any
+from pathlib import Path
+from typing import Optional, Dict, Any, Union
 from dotenv import load_dotenv
 import logging
 
 logger = logging.getLogger(__name__)
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+# The .env every entry point reads, regardless of the working directory.
+DEFAULT_ENV_FILE = PROJECT_ROOT / ".env"
+
+# Every format OutputFormatter can write. Entry points take their choices from
+# here so a new format can't be accepted by one command and rejected by another.
+# - `vtt-voice` emits WebVTT with `<v Speaker>...</v>` voice spans (YouTube-style).
+# - `json3` emits YouTube's auto-caption wire format, round-trippable via
+#   `yt-dlp --convert-subs`.
+OUTPUT_FORMATS = ["txt", "srt", "vtt", "vtt-voice", "json", "json3", "pretty"]
+
+
+def load_env_file(env_file: Optional[Union[str, Path]] = None) -> Optional[Path]:
+    """Load a .env file into the environment without overriding it.
+
+    Variables already set in the environment (exported in the shell, or set
+    inline as in ``INCLUDE_DIARIZATION=true python ...``) take precedence over
+    the file.
+
+    Args:
+        env_file: Path to the file; defaults to the project's ``.env``.
+
+    Returns:
+        The path that was loaded, or None if the file doesn't exist.
+    """
+    path = Path(env_file) if env_file else DEFAULT_ENV_FILE
+    if not path.is_file():
+        if env_file:
+            # Asked for by name (e.g. `server --config prod.env`): running on
+            # defaults instead must not go unnoticed.
+            logger.warning(f"Config file {path} not found; using the environment and defaults")
+        else:
+            logger.debug(f"No .env file at {path}")
+        return None
+    logger.debug(f"Loading configuration from {path}")
+    load_dotenv(path, override=False)
+    return path
+
 
 class Config:
     """Configuration class to handle all settings for the Whisperbox.
@@ -17,17 +58,17 @@ class Config:
         """Initialize configuration from environment variables.
 
         Args:
-            env_file: Optional path to a .env file to load
+            env_file: Optional path to a .env file to load first; variables
+                already in the environment win over the file
             **overrides: Optional keyword arguments to override env values.
                 Supported keys: whisper_model, language, output_format,
                 include_diarization, diarization_model, force_cpu,
-                transcription_engine, parakeet_model
+                transcription_engine, parakeet_model. A whisper_model
+                override selects the Whisper engine unless the engine was
+                chosen explicitly.
         """
         if env_file:
-            logger.info(f"Loading configuration from {env_file}")
-            load_dotenv(env_file, override=True)
-        else:
-            logger.info("Using existing environment variables for configuration")
+            load_env_file(env_file)
 
         # API tokens and model settings
         self.hf_token = os.getenv("HF_TOKEN")
@@ -109,7 +150,43 @@ class Config:
         if 'parakeet_model' in overrides:
             self.parakeet_model = overrides['parakeet_model']
 
+        # An explicit Whisper model request (--model) means Whisper, unless an
+        # engine was also chosen explicitly (--engine or TRANSCRIPTION_ENGINE).
+        if 'whisper_model' in overrides and self.transcription_engine != "whisper":
+            if self.transcription_engine_defaulted:
+                logger.info(
+                    f"Whisper model {self.whisper_model_size} requested; using Whisper "
+                    f"instead of the default {self.transcription_engine} engine"
+                )
+                self.transcription_engine = "whisper"
+                self.transcription_engine_defaulted = False
+            else:
+                logger.warning(
+                    f"Whisper model {self.whisper_model_size} has no effect with the "
+                    f"{self.transcription_engine} engine; set PARAKEET_MODEL to choose "
+                    f"its model"
+                )
+        if 'language' in overrides and self.transcription_engine == "parakeet":
+            logger.warning(
+                f"The parakeet engine detects the language itself; ignoring "
+                f"language {self.language}"
+            )
+
         logger.debug(f"Configuration loaded: {self.to_dict()}")
+
+    def use_whisper_for_streaming(self) -> None:
+        """Switch to Whisper, the only engine that can stream.
+
+        Parakeet is the Apple Silicon default, so a defaulted engine switches
+        quietly; an explicitly chosen one switches with a warning.
+        """
+        if self.transcription_engine != "whisper" and not self.transcription_engine_defaulted:
+            logger.warning(
+                f"Streaming is Whisper-only; using Whisper instead of the "
+                f"{self.transcription_engine} engine you selected"
+            )
+        self.transcription_engine = "whisper"
+        self.transcription_engine_defaulted = False
 
     @property
     def output_format(self) -> str:
@@ -161,9 +238,8 @@ class Config:
             logger.warning("Speaker diarization is enabled but HF_TOKEN is not set")
             return False
 
-        valid_formats = ["txt", "srt", "vtt", "json", "pretty"]
-        if self.output_format not in valid_formats:
-            logger.warning(f"Invalid output format: {self.output_format}. Must be one of {valid_formats}")
+        if self.output_format not in OUTPUT_FORMATS:
+            logger.warning(f"Invalid output format: {self.output_format}. Must be one of {OUTPUT_FORMATS}")
             return False
 
         valid_engines = {"whisper", "parakeet"}

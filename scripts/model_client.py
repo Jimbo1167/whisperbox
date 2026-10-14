@@ -9,15 +9,14 @@ It allows sending transcription requests and viewing server status.
 import os
 import sys
 import time
-import json
 import logging
 import argparse
 import requests
-from pathlib import Path
 
 # Add the parent directory to the path so we can import the src package
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
+from src.config import OUTPUT_FORMATS
 from src.utils.progress import ProgressReporter
 
 # Configure logging
@@ -30,6 +29,9 @@ logging.basicConfig(
 )
 
 logger = logging.getLogger(__name__)
+
+# Seconds between job-status polls while the server transcribes.
+POLL_INTERVAL = 1.0
 
 def build_transcribe_options(args):
     """Build the form fields for a transcription request.
@@ -121,7 +123,7 @@ def transcribe_file(server_url, file_path, options=None):
                 progress.set_description(f"Processing job {job_id}")
                 
                 while True:
-                    time.sleep(1.0)  # Poll every second
+                    time.sleep(POLL_INTERVAL)
                     status_response = session.get(f"{server_url}/api/jobs/{job_id}")
                     status_response.raise_for_status()
                     job_status = status_response.json()
@@ -151,6 +153,9 @@ def transcribe_file(server_url, file_path, options=None):
                 progress.completed = file_size
                 return result
                 
+    except requests.exceptions.HTTPError as e:
+        logger.error(f"Server rejected the request: {_error_detail(e.response)}")
+        return None
     except requests.exceptions.RequestException as e:
         logger.error(f"Error during transcription request: {str(e)}")
         return None
@@ -158,6 +163,13 @@ def transcribe_file(server_url, file_path, options=None):
         # Close the file
         if 'files' in locals() and 'file' in files:
             files['file'].close()
+
+def _error_detail(response):
+    """The server's error message from an error response, else its status line."""
+    try:
+        return response.json()["error"]
+    except (ValueError, KeyError, TypeError):
+        return f"{response.status_code} {response.reason}"
 
 def format_segment(segment):
     """Format a server segment as ``[MM:SS.mmm --> MM:SS.mmm] (speaker) text``.
@@ -215,35 +227,24 @@ def display_server_status(status):
     
     print("\n=== Server Status ===")
     print(f"Status: {status.get('status', 'Unknown')}")
-    print(f"Uptime: {status.get('uptime', 'Unknown')}")
+    uptime = status.get('uptime')
+    print(f"Uptime: {uptime:.0f}s" if isinstance(uptime, (int, float)) else "Uptime: Unknown")
     
-    # Display loaded models
-    if 'models' in status:
-        print("\n=== Loaded Models ===")
-        for model_name, model_info in status['models'].items():
-            print(f"- {model_name}: {model_info.get('status', 'Unknown')}")
-            if 'memory_usage' in model_info:
-                print(f"  Memory usage: {model_info['memory_usage']} MB")
-            if 'device' in model_info:
-                print(f"  Device: {model_info['device']}")
-    
-    # Display resource usage
-    if 'resources' in status:
-        resources = status['resources']
-        print("\n=== Resource Usage ===")
-        print(f"CPU: {resources.get('cpu_percent', 'N/A')}%")
-        print(f"Memory: {resources.get('memory_used', 'N/A')} / {resources.get('memory_total', 'N/A')} MB")
-        if 'gpu_memory_used' in resources:
-            print(f"GPU Memory: {resources['gpu_memory_used']} / {resources.get('gpu_memory_total', 'N/A')} MB")
-    
-    # Display job queue
-    if 'queue' in status:
-        queue = status['queue']
-        print("\n=== Job Queue ===")
-        print(f"Active jobs: {queue.get('active_jobs', 0)}")
-        print(f"Pending jobs: {queue.get('pending_jobs', 0)}")
-        print(f"Completed jobs: {queue.get('completed_jobs', 0)}")
-        print(f"Failed jobs: {queue.get('failed_jobs', 0)}")
+    model = status.get('model') or {}
+    if model:
+        print("\n=== Model ===")
+        print(f"Engine: {model.get('engine', 'Unknown')}")
+        print(f"Model: {model.get('model') or model.get('model_size', 'Unknown')}")
+        print(f"Language: {model.get('language', 'Unknown')}")
+        print(f"Device: {model.get('device', 'Unknown')}")
+
+    stats = status.get('stats') or {}
+    if stats:
+        print("\n=== Requests ===")
+        print(f"Requests: {stats.get('requests', 0)}")
+        print(f"Successful: {stats.get('successful', 0)}")
+        print(f"Failed: {stats.get('failed', 0)}")
+        print(f"Average processing time: {stats.get('avg_processing_time', 0.0):.1f}s")
 
 def main(argv=None):
     """Main function for the model client script."""
@@ -270,11 +271,11 @@ def main(argv=None):
     )
     transcribe_parser.add_argument(
         "--model", "-m",
-        help="Whisper model size (tiny, base, small, medium, large)"
+        help="Model the server must be running; the request is refused otherwise"
     )
     transcribe_parser.add_argument(
         "--language", "-l",
-        help="Language code (e.g., en, fr, de)"
+        help="Language the server must be using; the request is refused otherwise"
     )
     transcribe_parser.add_argument(
         "--diarize", "-d",
@@ -287,8 +288,8 @@ def main(argv=None):
     )
     transcribe_parser.add_argument(
         "--format", "-f",
-        choices=["txt", "srt", "vtt", "json"],
-        help="Output format (default: txt)"
+        choices=OUTPUT_FORMATS,
+        help="Output format (default: the server's OUTPUT_FORMAT)"
     )
     
     args = parser.parse_args(argv)
@@ -320,16 +321,16 @@ def main(argv=None):
             if args.output:
                 try:
                     with open(args.output, 'w', encoding='utf-8') as f:
-                        if args.format == 'json':
-                            json.dump(result, f, indent=2)
-                        else:
-                            # For text formats, write the formatted output
-                            if 'segments' in result:
-                                for segment in result['segments']:
-                                    f.write(format_segment(segment) + "\n")
-                            else:
-                                # Simple text output
-                                f.write(result.get('text', 'No text available'))
+                        # The server formatted the transcript in the requested
+                        # format (preview_text); write exactly that. A result
+                        # without it gets the console rendering.
+                        text = result.get('preview_text')
+                        if text is None:
+                            text = "".join(
+                                format_segment(segment) + "\n"
+                                for segment in result.get('segments', [])
+                            )
+                        f.write(text)
                     
                     logger.info(f"Transcription saved to {args.output}")
                 except Exception as e:
